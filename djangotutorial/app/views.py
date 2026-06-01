@@ -19,38 +19,38 @@ from .serializers import (
     ApoliceSeguroSerializer, RelatorioEstagioSerializer, AssinaturaDigitalSerializer,
 )
 from .permissions import (
-    SolicitacaoEstagioPermission, get_aluno, get_coordenador, is_admin,
+    SolicitacaoEstagioPermission, IsCursoDonoOuAdmin,
+    get_aluno, get_coordenador, is_admin,
 )
 
 
 # ── ViewSets de entidades secundárias ─────────────────────────────────────────
 
 class CursoViewSet(viewsets.ModelViewSet):
+    """
+    Leitura:
+      - admin            → todos os cursos
+      - coordenador      → apenas os cursos que ele coordena
+      - demais usuários  → todos os cursos (somente leitura)
+    Escrita (update/partial_update/destroy):
+      - apenas admin ou o coordenador responsável pelo curso (IsCursoDonoOuAdmin)
+    """
     serializer_class = CursoSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        if is_admin(user):
-            return Curso.objects.all()
         coordenador = get_coordenador(user)
-        if coordenador is not None:
-            return Curso.objects.filter(coordenador=coordenador)
-        return Curso.objects.all()
+        if coordenador is not None and not is_admin(user):
+            return Curso.objects.filter(coordenador=coordenador).select_related(
+                'coordenador__usuario',
+            )
+        # Admin e demais usuários autenticados leem todos os cursos
+        return Curso.objects.select_related('coordenador__usuario').all()
 
     def get_permissions(self):
-        # Escrita só para admin ou coordenador do curso
         if self.action in ('update', 'partial_update', 'destroy'):
-            from rest_framework.permissions import BasePermission
-
-            class _SoCoordenadorOuAdmin(BasePermission):
-                def has_object_permission(self_, request, view, obj):
-                    if is_admin(request.user):
-                        return True
-                    coord = get_coordenador(request.user)
-                    return coord is not None and obj.coordenador_id == coord.pk
-
-            return [IsAuthenticated(), _SoCoordenadorOuAdmin()]
+            return [IsAuthenticated(), IsCursoDonoOuAdmin()]
         return [IsAuthenticated()]
 
 
@@ -65,8 +65,23 @@ class AlunoViewSet(viewsets.ModelViewSet):
 
 
 class CoordenadorViewSet(viewsets.ModelViewSet):
-    queryset = Coordenador.objects.select_related('usuario').all()
+    """
+    Leitura:
+      - admin        → todos os coordenadores
+      - coordenador  → apenas o seu próprio registro
+      - demais       → nenhum (negação por padrão)
+    """
     serializer_class = CoordenadorSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if is_admin(user):
+            return Coordenador.objects.select_related('usuario').all()
+        coordenador = get_coordenador(user)
+        if coordenador is not None:
+            return Coordenador.objects.filter(pk=coordenador.pk).select_related('usuario')
+        return Coordenador.objects.none()
 
 
 # ── SolicitacaoEstagio — ViewSet com RBAC completo ────────────────────────────

@@ -11,12 +11,6 @@ class UsuarioSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class CursoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Curso
-        fields = '__all__'
-
-
 class EmpresaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Empresa
@@ -29,10 +23,78 @@ class AlunoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+# ── Serializers de Coordenador ────────────────────────────────────────────────
+
+class UsuarioResumoSerializer(serializers.ModelSerializer):
+    """Embutido em CoordenadorSerializer — expõe só nome e email."""
+    class Meta:
+        model = Usuario
+        fields = ['nome', 'email_institucional']
+
+
 class CoordenadorSerializer(serializers.ModelSerializer):
+    usuario = UsuarioResumoSerializer(read_only=True)
+
     class Meta:
         model = Coordenador
-        fields = '__all__'
+        fields = ['id', 'usuario', 'departamento']
+
+
+# ── Serializers de Curso ──────────────────────────────────────────────────────
+
+class CoordenadorNomeSerializer(serializers.ModelSerializer):
+    """Embutido em CursoSerializer — expõe só o nome do coordenador."""
+    nome = serializers.CharField(source='usuario.nome', read_only=True)
+
+    class Meta:
+        model = Coordenador
+        fields = ['id', 'nome']
+
+
+class CursoSerializer(serializers.ModelSerializer):
+    coordenador = CoordenadorNomeSerializer(read_only=True)
+    coordenador_id = serializers.PrimaryKeyRelatedField(
+        queryset=Coordenador.objects.all(), source='coordenador', write_only=True,
+        required=False, allow_null=True,
+    )
+
+    class Meta:
+        model = Curso
+        fields = ['id', 'nome', 'coordenador', 'coordenador_id', 'carga_horaria_maxima_diaria']
+
+
+# ── AlunoResumoSerializer ─────────────────────────────────────────────────────
+
+class AlunoResumoSerializer(serializers.ModelSerializer):
+    nome = serializers.CharField(source='usuario.nome', read_only=True)
+    email = serializers.CharField(source='usuario.email_institucional', read_only=True)
+    curso_nome = serializers.CharField(source='curso.nome', read_only=True, default=None)
+    tem_processo_ativo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Aluno
+        fields = ['id', 'nome', 'email', 'curso_nome', 'matriculado_estagio', 'tem_processo_ativo']
+
+    def get_tem_processo_ativo(self, obj):
+        status_inativos = {
+            SolicitacaoEstagio.Status.REJEITADO,
+            SolicitacaoEstagio.Status.ENCERRADO,
+            SolicitacaoEstagio.Status.CANCELADO,
+        }
+        return obj.solicitacoes.exclude(status__in=status_inativos).exists()
+
+
+# ── ProcessoResumoSerializer ──────────────────────────────────────────────────
+
+class ProcessoResumoSerializer(serializers.ModelSerializer):
+    aluno_nome = serializers.CharField(source='aluno.usuario.nome', read_only=True)
+    empresa_nome = serializers.CharField(source='empresa.razao_social', read_only=True)
+    curso_nome = serializers.CharField(source='aluno.curso.nome', read_only=True, default=None)
+    data_inicio = serializers.DateField(source='data_inicio_prevista', read_only=True)
+
+    class Meta:
+        model = SolicitacaoEstagio
+        fields = ['id', 'aluno_nome', 'empresa_nome', 'curso_nome', 'status', 'data_inicio']
 
 
 class SolicitacaoEstagioSerializer(serializers.ModelSerializer):

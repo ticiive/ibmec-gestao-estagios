@@ -93,3 +93,16 @@ class SolicitacaoEstagioPermission(permissions.BasePermission):
             return curso is not None and curso.coordenador_id == coordenador.pk
 
         return False
+
+
+class IsCursoDonoOuAdmin(permissions.BasePermission):
+    """
+    Escrita em Curso liberada apenas para admin ou para o coordenador
+    responsável pelo curso. Leitura é controlada no get_queryset da view.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        if is_admin(request.user):
+            return True
+        coordenador = get_coordenador(request.user)
+        return coordenador is not None and obj.coordenador_id == coordenador.pk

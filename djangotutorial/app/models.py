@@ -35,16 +35,10 @@ class Coordenador(models.Model):
 
 class Curso(models.Model):
     nome = models.CharField(max_length=200)
-    '''
-    carga_horaria_minima_total = models.PositiveIntegerField(
-        null=True, blank=True,
-        help_text='Carga horária mínima total exigida para integralização (horas)',
-    )
     carga_horaria_maxima_diaria = models.PositiveIntegerField(
         null=True, blank=True,
         help_text='Limite diário de horas permitido pela legislação/PPC',
     )
-    '''
     coordenador = models.ForeignKey(
         Coordenador,
         on_delete=models.SET_NULL,
@@ -69,6 +63,10 @@ class Aluno(models.Model):
     cpf = models.CharField(max_length=14, unique=True)
     rg = models.CharField(max_length=20, blank=True, default='')
     coeficiente_rendimento = models.DecimalField(max_digits=2, decimal_places=2, default=0)
+    matriculado_estagio = models.BooleanField(
+        default=False,
+        help_text='Indica se o aluno está formalmente matriculado em estágio',
+    )
     curso = models.ForeignKey(
         Curso, on_delete=models.PROTECT, related_name='alunos', null=True, blank=True
     )
@@ -107,6 +105,7 @@ class SolicitacaoEstagio(models.Model):
         RETIFICACAO_SOLICITADA = 'RETIFICACAO_SOLICITADA', 'Retificação Solicitada'
         ATIVO = 'ATIVO', 'Ativo'
         ENCERRADO = 'ENCERRADO', 'Encerrado'
+        CANCELADO = 'CANCELADO', 'Cancelado'
 
     aluno = models.ForeignKey(
         Aluno, on_delete=models.PROTECT, related_name='solicitacoes'
