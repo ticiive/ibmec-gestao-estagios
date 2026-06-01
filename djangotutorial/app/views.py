@@ -13,7 +13,7 @@ from .models import (
 )
 from .serializers import (
     UsuarioSerializer, CursoSerializer, EmpresaSerializer,
-    AlunoSerializer, CoordenadorSerializer,
+    AlunoSerializer, AlunoResumoSerializer, CoordenadorSerializer,
     SolicitacaoEstagioSerializer, CriarSolicitacaoSerializer,
     AlterarStatusSerializer, TermoCompromissoSerializer,
     ApoliceSeguroSerializer, RelatorioEstagioSerializer, AssinaturaDigitalSerializer,
@@ -52,6 +52,46 @@ class CursoViewSet(viewsets.ModelViewSet):
         if self.action in ('update', 'partial_update', 'destroy'):
             return [IsAuthenticated(), IsCursoDonoOuAdmin()]
         return [IsAuthenticated()]
+
+    @action(detail=False, methods=['get'], url_path='meus_alunos')
+    def meus_alunos(self, request):
+        """
+        GET /api/cursos/meus_alunos/
+        Retorna alunos dos cursos coordenados pelo usuário logado.
+
+        Filtros via query params:
+          ?curso=<id>        — filtra por curso específico
+          ?matriculado=true  — filtra por flag matriculado_estagio
+          ?nome=joao         — busca parcial, case-insensitive
+        """
+        coordenador = get_coordenador(request.user)
+        if coordenador is None and not is_admin(request.user):
+            raise PermissionDenied('Apenas coordenadores podem acessar este endpoint.')
+
+        # Base: alunos cujo curso pertence ao coordenador logado
+        qs = Aluno.objects.filter(
+            curso__coordenador=coordenador,
+        ).select_related('usuario', 'curso').prefetch_related('solicitacoes')
+
+        # Filtro por curso específico
+        curso_id = request.query_params.get('curso')
+        if curso_id:
+            qs = qs.filter(curso_id=curso_id)
+
+        # Filtro por matriculado_estagio
+        matriculado = request.query_params.get('matriculado', '').lower()
+        if matriculado == 'true':
+            qs = qs.filter(matriculado_estagio=True)
+        elif matriculado == 'false':
+            qs = qs.filter(matriculado_estagio=False)
+
+        # Filtro por nome (parcial, case-insensitive)
+        nome = request.query_params.get('nome', '').strip()
+        if nome:
+            qs = qs.filter(usuario__nome__icontains=nome)
+
+        serializer = AlunoResumoSerializer(qs, many=True)
+        return Response(serializer.data)
 
 
 class EmpresaViewSet(viewsets.ModelViewSet):
