@@ -58,8 +58,32 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
 
 class AlunoViewSet(viewsets.ModelViewSet):
-    queryset = Aluno.objects.select_related('usuario', 'curso').all()
+    """
+    Isolamento de dados (Pessoa 3):
+      - admin        → todos os alunos
+      - coordenador  → apenas alunos dos seus cursos
+      - aluno        → apenas ele mesmo
+      - outros       → vazio (negação por padrão)
+    """
     serializer_class = AlunoSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        base = Aluno.objects.select_related('usuario', 'curso')
+        user = self.request.user
+
+        if is_admin(user):
+            return base.all()
+
+        coordenador = get_coordenador(user)
+        if coordenador is not None:
+            return base.filter(curso__coordenador=coordenador)
+
+        aluno = get_aluno(user)
+        if aluno is not None:
+            return base.filter(pk=aluno.pk)
+
+        return Aluno.objects.none()
 
 
 class CoordenadorViewSet(viewsets.ModelViewSet):
