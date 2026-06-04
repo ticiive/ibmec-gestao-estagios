@@ -12,7 +12,7 @@ from .models import (
 )
 from .serializers import (
     UsuarioSerializer, CursoSerializer, EmpresaSerializer,
-    AlunoSerializer, CoordenadorSerializer,
+    AlunoSerializer, CoordenadorSerializer, PerfilAlunoSerializer,
     SolicitacaoEstagioSerializer, CriarSolicitacaoSerializer,
     AlterarStatusSerializer,
 )
@@ -84,6 +84,27 @@ class AlunoViewSet(viewsets.ModelViewSet):
             return base.filter(pk=aluno.pk)
 
         return Aluno.objects.none()
+
+    @action(detail=False, methods=['get', 'put', 'patch'], url_path='meu_perfil')
+    def meu_perfil(self, request):
+        """
+        Perfil do aluno autenticado.
+          GET            → dados do próprio aluno
+          PUT / PATCH    → atualiza dados editáveis (CPF é imutável)
+        """
+        aluno = get_aluno(request.user)
+        if aluno is None:
+            raise PermissionDenied('Apenas alunos possuem perfil de aluno.')
+
+        if request.method == 'GET':
+            return Response(PerfilAlunoSerializer(aluno).data)
+
+        serializer = PerfilAlunoSerializer(
+            aluno, data=request.data, partial=(request.method == 'PATCH'),
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class CoordenadorViewSet(viewsets.ModelViewSet):

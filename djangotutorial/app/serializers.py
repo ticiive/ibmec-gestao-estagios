@@ -34,6 +34,24 @@ class CoordenadorSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class PerfilAlunoSerializer(serializers.ModelSerializer):
+    """
+    Perfil do próprio aluno (Pessoa 3).
+    Dados do Usuario vinculado são read-only; CPF não pode ser alterado.
+    Único campo editável pelo aluno é o RG.
+    """
+    nome = serializers.CharField(source='usuario.nome', read_only=True)
+    email = serializers.CharField(source='usuario.email_institucional', read_only=True)
+
+    class Meta:
+        model = Aluno
+        fields = [
+            'id', 'nome', 'email', 'cpf', 'rg',
+            'coeficiente_rendimento', 'curso',
+        ]
+        read_only_fields = ['cpf', 'coeficiente_rendimento', 'curso']
+
+
 class SolicitacaoEstagioSerializer(serializers.ModelSerializer):
     """Serializer completo — usado somente por admin."""
     class Meta:
