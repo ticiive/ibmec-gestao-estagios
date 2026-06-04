@@ -5,6 +5,7 @@ from .views import (
     CursoViewSet, EmpresaConcedenteViewSet, AlunoViewSet,
     CoordenadorViewSet, SupervisorEmpresaViewSet,
     DocumentoProcessoViewSet, ProcessoEstagioViewSet,
+    ModeloFormularioViewSet,
     GerarPDFView, GerarRelatorioView,
     RegisterView, LoginView, LogoutView,
 )
@@ -17,6 +18,7 @@ router.register(r'coordenadores',        CoordenadorViewSet,       basename='coo
 router.register(r'supervisores-empresa', SupervisorEmpresaViewSet, basename='supervisor-empresa')
 router.register(r'documentos',           DocumentoProcessoViewSet, basename='documento')
 router.register(r'processos-estagio',    ProcessoEstagioViewSet,   basename='processo-estagio')
+router.register(r'modelos-formulario',   ModeloFormularioViewSet,  basename='modelo-formulario')
 
 urlpatterns = [
     path('', include(router.urls)),

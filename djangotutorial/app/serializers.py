@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (
     Usuario, Curso, EmpresaConcedente, Aluno, Coordenador,
     SupervisorEmpresa, ProcessoEstagio, DocumentoProcesso, LogDocumento,
+    ModeloFormulario,
 )
 from .state_machine import ESTADOS_VIVOS
 from .permissions import get_aluno, get_supervisor
@@ -104,6 +105,58 @@ class LogDocumentoSerializer(serializers.ModelSerializer):
         if obj.usuario:
             return obj.usuario.nome
         return None
+
+
+class ModeloFormularioSerializer(serializers.ModelSerializer):
+    curso_nome = serializers.CharField(source='curso.nome', read_only=True)
+    criado_por_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ModeloFormulario
+        fields = '__all__'
+        read_only_fields = ['criado_por', 'criado_em', 'atualizado_em']
+
+    def get_criado_por_nome(self, obj):
+        if obj.criado_por:
+            return obj.criado_por.usuario.nome
+        return None
+
+    def validate_secoes(self, value):
+        TIPOS_VALIDOS = {
+            'auto', 'checkbox_duplo', 'escala_3',
+            'escala_1_4_multi', 'escala_1_4', 'texto_livre',
+        }
+        GRAFICOS_VALIDOS = {'radar', 'barras', 'barras_agrupadas', 'pizza', 'nenhum'}
+        if not isinstance(value, list):
+            raise serializers.ValidationError('secoes deve ser uma lista.')
+        for i, secao in enumerate(value):
+            if not isinstance(secao, dict):
+                raise serializers.ValidationError(f'Seção {i} deve ser um objeto.')
+            if 'id' not in secao:
+                raise serializers.ValidationError(f'Seção {i} precisa de um campo id.')
+            if 'tipo' not in secao:
+                raise serializers.ValidationError(f'Seção {i} precisa de um campo tipo.')
+            if secao['tipo'] not in TIPOS_VALIDOS:
+                raise serializers.ValidationError(
+                    f'Seção {i}: tipo inválido. Válidos: {sorted(TIPOS_VALIDOS)}'
+                )
+            if 'titulo' not in secao:
+                raise serializers.ValidationError(f'Seção {i} precisa de um campo titulo.')
+            if 'grafico' not in secao:
+                raise serializers.ValidationError(f'Seção {i} precisa de um campo grafico.')
+            if secao['grafico'] not in GRAFICOS_VALIDOS:
+                raise serializers.ValidationError(
+                    f'Seção {i}: grafico inválido. Válidos: {sorted(GRAFICOS_VALIDOS)}'
+                )
+            if secao['tipo'] not in ('auto', 'texto_livre') and 'itens' not in secao:
+                raise serializers.ValidationError(
+                    f'Seção {i} do tipo {secao["tipo"]} precisa de itens.'
+                )
+            if secao['tipo'] in ('checkbox_duplo', 'escala_1_4_multi') and 'colunas' not in secao:
+                raise serializers.ValidationError(
+                    f'Seção {i} do tipo {secao["tipo"]} precisa de colunas.'
+                )
+        return value
 
 
 class ProcessoEstagioSerializer(serializers.ModelSerializer):

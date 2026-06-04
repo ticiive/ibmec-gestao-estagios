@@ -967,3 +967,221 @@ class DocumentoEPDFTests(APITestCase):
         self.assertEqual(r['Content-Type'], 'application/pdf')
         count_depois = DocumentoProcesso.objects.filter(processo=self.processo).count()
         self.assertEqual(count_antes, count_depois)
+
+
+# ── ModeloFormulario ──────────────────────────────────────────────────────────
+
+from app.models import ModeloFormulario
+
+
+MODELOS_URL = '/api/modelos-formulario/'
+
+
+def _secoes_validas():
+    return [
+        {
+            'id': 'comportamental',
+            'tipo': 'escala_1_4',
+            'titulo': 'Inteligência Comportamental',
+            'itens': ['Visão', 'Adaptabilidade', 'Empatia'],
+            'grafico': 'radar',
+        },
+        {
+            'id': 'comentarios',
+            'tipo': 'texto_livre',
+            'titulo': 'Comentários Gerais',
+            'grafico': 'nenhum',
+        },
+    ]
+
+
+class ModeloFormularioTests(APITestCase):
+    """Testes de CRUD de ModeloFormulario com permissões por papel."""
+
+    def setUp(self):
+        # Coordenador A + Curso A
+        self.user_coord_a = Usuario.objects.create_user(
+            username='mf_coord_a', password='senha123', tipo='coordenador', nome='Coord A',
+        )
+        self.coord_a = Coordenador.objects.create(usuario=self.user_coord_a)
+        self.curso_a = Curso.objects.create(
+            nome='Ciência de Dados',
+            coordenador=self.coord_a,
+            carga_horaria_minima_total=400,
+            carga_horaria_maxima_diaria=6,
+        )
+
+        # Coordenador B + Curso B
+        self.user_coord_b = Usuario.objects.create_user(
+            username='mf_coord_b', password='senha123', tipo='coordenador', nome='Coord B',
+        )
+        self.coord_b = Coordenador.objects.create(usuario=self.user_coord_b)
+        self.curso_b = Curso.objects.create(
+            nome='Administração',
+            coordenador=self.coord_b,
+            carga_horaria_minima_total=300,
+            carga_horaria_maxima_diaria=6,
+        )
+
+        # Aluno matriculado no Curso A
+        self.user_aluno = Usuario.objects.create_user(
+            username='mf_aluno', password='senha123', tipo='aluno', nome='Aluno MF',
+        )
+        self.aluno = Aluno.objects.create(
+            usuario=self.user_aluno,
+            cpf='444.444.444-44',
+            curso=self.curso_a,
+            matriculado_estagio=True,
+        )
+
+        # Modelo do Curso A criado pelo Coord A
+        self.modelo_a = ModeloFormulario.objects.create(
+            curso=self.curso_a,
+            criado_por=self.coord_a,
+            titulo='Avaliação de Estágio — CDIA',
+            secoes=_secoes_validas(),
+            ativo=True,
+        )
+
+    def _auth(self, user):
+        self.client.force_authenticate(user=user)
+
+    def _payload_criar(self, curso_id=None, titulo='Formulário Teste'):
+        return {
+            'curso': curso_id or self.curso_a.pk,
+            'titulo': titulo,
+            'secoes': _secoes_validas(),
+            'ativo': True,
+        }
+
+    # ── 1. Coordenador cria modelo para seu curso ─────────────────────────
+
+    def test_coordenador_cria_modelo(self):
+        """Coordenador cria modelo para seu curso → 201."""
+        self._auth(self.user_coord_a)
+        r = self.client.post(MODELOS_URL, self._payload_criar(), format='json')
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data['titulo'], 'Formulário Teste')
+
+    # ── 2. Coordenador não pode criar para outro curso ────────────────────
+
+    def test_coordenador_nao_cria_para_outro_curso(self):
+        """Coordenador tenta criar modelo para curso de outro coord → 400 ou 403."""
+        self._auth(self.user_coord_a)
+        r = self.client.post(
+            MODELOS_URL,
+            self._payload_criar(curso_id=self.curso_b.pk),
+            format='json',
+        )
+        # O curso_b não está no queryset do coord_a → o objeto não pode ser atribuído
+        self.assertIn(r.status_code, (status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN))
+
+    # ── 3. Aluno não pode criar modelo ───────────────────────────────────
+
+    def test_aluno_nao_cria_modelo(self):
+        """Aluno POST /modelos-formulario/ → 403."""
+        self._auth(self.user_aluno)
+        r = self.client.post(MODELOS_URL, self._payload_criar(), format='json')
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    # ── 4. Aluno vê só modelos do seu curso ──────────────────────────────
+
+    def test_aluno_ve_modelo_do_seu_curso(self):
+        """Aluno GET /modelos-formulario/ → vê só modelos do seu curso."""
+        # Criar modelo no Curso B (outro curso)
+        ModeloFormulario.objects.create(
+            curso=self.curso_b,
+            criado_por=self.coord_b,
+            titulo='Formulário Adm',
+            secoes=_secoes_validas(),
+            ativo=True,
+        )
+        self._auth(self.user_aluno)
+        r = self.client.get(MODELOS_URL)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        data = r.data if isinstance(r.data, list) else r.data.get('results', r.data)
+        ids = [m['id'] for m in data]
+        self.assertIn(self.modelo_a.pk, ids)
+        # Garante que só vê o do próprio curso
+        for m in data:
+            self.assertEqual(m['curso'], self.curso_a.pk)
+
+    # ── 5. Coordenador edita o próprio modelo ────────────────────────────
+
+    def test_coordenador_edita_proprio_modelo(self):
+        """Coordenador PATCH no seu modelo → 200."""
+        self._auth(self.user_coord_a)
+        r = self.client.patch(
+            f'{MODELOS_URL}{self.modelo_a.pk}/',
+            {'titulo': 'Título Atualizado'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.modelo_a.refresh_from_db()
+        self.assertEqual(self.modelo_a.titulo, 'Título Atualizado')
+
+    # ── 6. Coordenador não edita modelo de outro curso ───────────────────
+
+    def test_coordenador_nao_edita_modelo_de_outro(self):
+        """Coordenador PATCH no modelo de outro curso → 403 ou 404."""
+        self._auth(self.user_coord_b)
+        r = self.client.patch(
+            f'{MODELOS_URL}{self.modelo_a.pk}/',
+            {'titulo': 'Invasão'},
+            format='json',
+        )
+        self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+
+    # ── 7. Tipo de seção inválido → 400 ──────────────────────────────────
+
+    def test_validacao_secoes_tipo_invalido(self):
+        """POST com tipo de seção inválido → 400."""
+        self._auth(self.user_coord_a)
+        payload = self._payload_criar()
+        payload['secoes'] = [
+            {'id': 'x', 'tipo': 'tipo_inexistente', 'titulo': 'X', 'grafico': 'radar'},
+        ]
+        r = self.client.post(MODELOS_URL, payload, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # ── 8. Seção escala_1_4 sem itens → 400 ─────────────────────────────
+
+    def test_validacao_secoes_sem_itens(self):
+        """POST com seção escala_1_4 sem campo itens → 400."""
+        self._auth(self.user_coord_a)
+        payload = self._payload_criar()
+        payload['secoes'] = [
+            {'id': 'y', 'tipo': 'escala_1_4', 'titulo': 'Y', 'grafico': 'radar'},
+        ]
+        r = self.client.post(MODELOS_URL, payload, format='json')
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # ── 9. Criação com seções válidas salva estrutura corretamente ────────
+
+    def test_modelo_com_secoes_validas(self):
+        """POST com secoes bem formadas → 201, estrutura salva corretamente."""
+        self._auth(self.user_coord_a)
+        secoes = [
+            {
+                'id': 'comportamental',
+                'tipo': 'escala_1_4',
+                'titulo': 'Inteligência Comportamental',
+                'itens': ['Visão', 'Adaptabilidade'],
+                'grafico': 'radar',
+            },
+            {
+                'id': 'softwares',
+                'tipo': 'escala_1_4_multi',
+                'titulo': 'Ferramentas',
+                'itens': ['Python', 'SQL'],
+                'colunas': ['Empresa usa', 'Você usou'],
+                'grafico': 'barras_agrupadas',
+            },
+        ]
+        payload = {'curso': self.curso_a.pk, 'titulo': 'Formulário Completo', 'secoes': secoes, 'ativo': True}
+        r = self.client.post(MODELOS_URL, payload, format='json')
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        modelo = ModeloFormulario.objects.get(pk=r.data['id'])
+        self.assertEqual(len(modelo.secoes), 2)
+        self.assertEqual(modelo.secoes[0]['tipo'], 'escala_1_4')
+        self.assertEqual(modelo.secoes[1]['tipo'], 'escala_1_4_multi')

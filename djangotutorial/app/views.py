@@ -10,12 +10,14 @@ from django.contrib.auth import authenticate
 from .models import (
     Usuario, Curso, EmpresaConcedente, Aluno, Coordenador,
     SupervisorEmpresa, ProcessoEstagio, DocumentoProcesso, LogDocumento,
+    ModeloFormulario,
 )
 from .serializers import (
     UsuarioSerializer, CursoSerializer, EmpresaConcedenteSerializer,
     AlunoSerializer, CoordenadorSerializer, SupervisorEmpresaSerializer,
     DocumentoProcessoSerializer, LogDocumentoSerializer,
     ProcessoEstagioSerializer, CriarProcessoSerializer, AlterarStatusSerializer,
+    ModeloFormularioSerializer,
 )
 from .score_utils import calcular_score_conformidade
 from .permissions import (
@@ -213,6 +215,71 @@ class DocumentoProcessoViewSet(viewsets.ModelViewSet):
         doc = self.get_object()
         serializer = LogDocumentoSerializer(doc.logs.all(), many=True)
         return Response(serializer.data)
+
+
+# ── ModeloFormulario ──────────────────────────────────────────────────────────
+
+class ModeloFormularioViewSet(viewsets.ModelViewSet):
+    """
+    CRUD de modelos de formulário de avaliação.
+    - Coordenador: cria e edita apenas para o seu curso
+    - Admin: acesso total
+    - Aluno: leitura dos modelos ativos do seu curso
+    - Supervisor: leitura dos modelos ativos
+    """
+    serializer_class = ModeloFormularioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        base = ModeloFormulario.objects.select_related('curso', 'criado_por__usuario')
+        if is_admin(user):
+            return base.all()
+        coord = get_coordenador(user)
+        if coord is not None:
+            return base.filter(curso__coordenador=coord)
+        aluno = get_aluno(user)
+        if aluno is not None and aluno.curso:
+            return base.filter(curso=aluno.curso, ativo=True)
+        supervisor = get_supervisor(user)
+        if supervisor is not None:
+            return base.filter(ativo=True)
+        return ModeloFormulario.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        coord = get_coordenador(user)
+        if coord is None and not is_admin(user):
+            raise PermissionDenied('Apenas coordenadores podem criar modelos de formulário.')
+        if coord is not None:
+            curso = serializer.validated_data.get('curso')
+            if curso and curso.coordenador_id != coord.pk:
+                raise PermissionDenied('Você só pode criar formulários para o seu curso.')
+        serializer.save(criado_por=coord)
+
+    def update(self, request, *args, **kwargs):
+        user = request.user
+        instance = self.get_object()
+        coord = get_coordenador(user)
+        if not is_admin(user):
+            if coord is None or instance.curso.coordenador_id != coord.pk:
+                return Response(
+                    {'erro': 'Você só pode editar formulários do seu curso.'},
+                    status=drf_status.HTTP_403_FORBIDDEN,
+                )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        user = request.user
+        instance = self.get_object()
+        coord = get_coordenador(user)
+        if not is_admin(user):
+            if coord is None or instance.curso.coordenador_id != coord.pk:
+                return Response(
+                    {'erro': 'Você só pode excluir formulários do seu curso.'},
+                    status=drf_status.HTTP_403_FORBIDDEN,
+                )
+        return super().destroy(request, *args, **kwargs)
 
 
 # ── CORE da issue #46: ProcessoEstagio ────────────────────────────────────────

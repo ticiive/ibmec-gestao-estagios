@@ -221,6 +221,19 @@ class ProcessoEstagio(models.Model):
         null=True,
         help_text='Data real de término do estágio',
     )
+    modelo_formulario = models.ForeignKey(
+        'ModeloFormulario',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='processos',
+        help_text='Modelo de formulário de avaliação atribuído a este processo',
+    )
+    respostas_formulario = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='Respostas do aluno ao formulário de avaliação',
+    )
 
     def __str__(self):
         return f'Processo #{self.pk} — {self.aluno} @ {self.empresa} [{self.status}]'
@@ -310,3 +323,35 @@ class LogDocumento(models.Model):
 
     def __str__(self):
         return f'{self.acao} - {self.documento} - {self.data}'
+
+
+class ModeloFormulario(models.Model):
+    curso = models.ForeignKey(
+        'Curso',
+        on_delete=models.CASCADE,
+        related_name='modelos_formulario',
+    )
+    criado_por = models.ForeignKey(
+        'Coordenador',
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+    titulo = models.CharField(max_length=200)
+    secoes = models.JSONField(
+        default=list,
+        help_text=(
+            'Lista de seções do formulário. Tipos válidos: '
+            'auto, checkbox_duplo, escala_3, escala_1_4_multi, escala_1_4, texto_livre.'
+        ),
+    )
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Modelo de Formulário'
+        verbose_name_plural = 'Modelos de Formulário'
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f'{self.titulo} — {self.curso.nome}'
