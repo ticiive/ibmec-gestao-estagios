@@ -9,9 +9,10 @@ from .permissions import get_aluno, get_supervisor
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
+    """Whitelist explícito — nunca expor password, groups, user_permissions."""
     class Meta:
         model = Usuario
-        fields = ['id', 'username', 'tipo', 'nome', 'email_institucional', 'is_active']
+        fields = ['id', 'username', 'nome', 'email_institucional', 'tipo']
 
 
 class CursoSerializer(serializers.ModelSerializer):
@@ -26,10 +27,33 @@ class EmpresaConcedenteSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class AlunoSerializer(serializers.ModelSerializer):
+class AlunoListSerializer(serializers.ModelSerializer):
+    """Listagens públicas a coord/admin — sem dados sensíveis (CPF/RG)."""
+    usuario = UsuarioSerializer(read_only=True)
+    curso_nome = serializers.CharField(source='curso.nome', read_only=True)
+
     class Meta:
         model = Aluno
-        fields = '__all__'
+        fields = [
+            'id', 'usuario', 'curso', 'curso_nome',
+            'periodo_atual', 'coeficiente_rendimento', 'matriculado_estagio',
+        ]
+
+
+class AlunoDetailSerializer(serializers.ModelSerializer):
+    """O próprio aluno (ou admin) — inclui CPF/RG."""
+    usuario = UsuarioSerializer(read_only=True)
+
+    class Meta:
+        model = Aluno
+        fields = [
+            'id', 'usuario', 'cpf', 'rg',
+            'curso', 'periodo_atual', 'coeficiente_rendimento', 'matriculado_estagio',
+        ]
+
+
+# Alias mantido para compatibilidade com código que ainda importa AlunoSerializer
+AlunoSerializer = AlunoListSerializer
 
 
 class CoordenadorSerializer(serializers.ModelSerializer):

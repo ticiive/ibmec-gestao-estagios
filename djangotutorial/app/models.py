@@ -125,7 +125,8 @@ class Aluno(models.Model):
     cpf = models.CharField(max_length=14, unique=True)
     rg = models.CharField(max_length=20, blank=True, default='')
     coeficiente_rendimento = models.DecimalField(
-        max_digits=4, decimal_places=2, default=0
+        max_digits=4, decimal_places=2, default=0,
+        help_text='Coeficiente de rendimento do aluno (ex: 8.50)',
     )
     curso = models.ForeignKey(
         Curso,
@@ -133,6 +134,12 @@ class Aluno(models.Model):
         null=True,
         blank=True,
         related_name='alunos',
+    )
+    periodo_atual = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text='Período acadêmico atual do aluno (1 a 12)',
+        validators=[MinValueValidator(1), MaxValueValidator(12)],
     )
     matriculado_estagio = models.BooleanField(default=False)
 

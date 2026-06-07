@@ -14,7 +14,8 @@ from .models import (
 )
 from .serializers import (
     UsuarioSerializer, CursoSerializer, EmpresaConcedenteSerializer,
-    AlunoSerializer, CoordenadorSerializer, SupervisorEmpresaSerializer,
+    AlunoListSerializer, AlunoDetailSerializer,
+    CoordenadorSerializer, SupervisorEmpresaSerializer,
     DocumentoProcessoSerializer, LogDocumentoSerializer,
     ProcessoEstagioSerializer, CriarProcessoSerializer, AlterarStatusSerializer,
     ModeloFormularioSerializer,
@@ -68,7 +69,6 @@ class EmpresaConcedenteViewSet(viewsets.ModelViewSet):
 
 
 class AlunoViewSet(viewsets.ModelViewSet):
-    serializer_class = AlunoSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
@@ -83,6 +83,21 @@ class AlunoViewSet(viewsets.ModelViewSet):
         if coord is not None:
             return base.filter(curso__coordenador=coord)
         return base.none()
+
+    def get_serializer_class(self):
+        """Detail (com CPF/RG) só para admin ou para o próprio aluno acessando seu perfil.
+        Listagens e visões de coordenador usam o List (sem dados sensíveis)."""
+        user = self.request.user
+        if self.action in ('retrieve', 'update', 'partial_update'):
+            if is_admin(user):
+                return AlunoDetailSerializer
+            aluno = get_aluno(user)
+            if aluno is not None:
+                # próprio aluno olhando seu cadastro
+                obj_pk = self.kwargs.get(self.lookup_field or 'pk')
+                if obj_pk and str(obj_pk) == str(aluno.pk):
+                    return AlunoDetailSerializer
+        return AlunoListSerializer
 
 
 class CoordenadorViewSet(viewsets.ModelViewSet):
