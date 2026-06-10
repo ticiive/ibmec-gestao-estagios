@@ -832,21 +832,24 @@ class RegisterView(APIView):
     def post(self, request):
         data = request.data
         tipo = data.get('tipo', '').lower()
-        username = data.get('username', '').strip()
+        # Aceita 'email' (preferido) ou 'username' (compat) — o campo de auth é
+        # email_institucional, e username é sincronizado por Usuario.save().
+        email = (data.get('email') or data.get('email_institucional') or data.get('username') or '').strip()
         password = data.get('password', '')
 
-        if not username or not password:
+        if not email or not password:
             return Response(
-                {'erro': 'username e password são obrigatórios.'},
+                {'erro': 'email e password são obrigatórios.'},
                 status=drf_status.HTTP_400_BAD_REQUEST,
             )
+        username = email  # username sincronizado com email_institucional
 
         if tipo == 'aluno':
             try:
                 user = Usuario.objects.create_user(
                     username=username, password=password, tipo='aluno',
                     nome=data.get('nome', ''),
-                    email_institucional=data.get('email_institucional', ''),
+                    email_institucional=email,
                 )
                 Aluno.objects.create(
                     usuario=user,
@@ -870,7 +873,7 @@ class RegisterView(APIView):
                 user = Usuario.objects.create_user(
                     username=username, password=password, tipo='coordenador',
                     nome=data.get('nome', ''),
-                    email_institucional=data.get('email_institucional', ''),
+                    email_institucional=email,
                 )
                 Coordenador.objects.create(usuario=user, departamento=departamento)
             except Exception as e:
@@ -894,7 +897,7 @@ class RegisterView(APIView):
                 user = Usuario.objects.create_user(
                     username=username, password=password, tipo='supervisor_empresa',
                     nome=data.get('nome', ''),
-                    email_institucional=data.get('email_institucional', ''),
+                    email_institucional=email,
                 )
                 SupervisorEmpresa.objects.create(
                     usuario=user, empresa=empresa,
@@ -908,7 +911,7 @@ class RegisterView(APIView):
                 user = Usuario.objects.create_user(
                     username=username, password=password, tipo=tipo,
                     nome=data.get('nome', ''),
-                    email_institucional=data.get('email_institucional', ''),
+                    email_institucional=email,
                 )
             except Exception as e:
                 return Response({'erro': str(e)}, status=drf_status.HTTP_400_BAD_REQUEST)
@@ -930,13 +933,19 @@ class RegisterView(APIView):
 
 
 class LoginView(APIView):
-    """Autentica username/password e retorna token DRF + dados básicos do usuário."""
+    """Autentica email_institucional + password. Aceita 'email' ou 'username'
+    no payload (compat) e resolve via email_institucional."""
     permission_classes = [AllowAny]
 
     def post(self, request):
-        username = request.data.get('username', '')
+        identificador = (request.data.get('email') or request.data.get('username') or '').strip()
         password = request.data.get('password', '')
-        user = authenticate(username=username, password=password)
+        user = None
+        if identificador and password:
+            # Username está sincronizado com email_institucional (save() do Usuario);
+            # com USERNAME_FIELD='email_institucional', authenticate aceita o email
+            # como `username=` no kwarg do backend.
+            user = authenticate(request, username=identificador, password=password)
         if not user:
             return Response(
                 {'erro': 'Credenciais inválidas.'},
@@ -948,6 +957,7 @@ class LoginView(APIView):
             'id': user.pk,
             'tipo': user.tipo,
             'nome': user.nome,
+            'email': user.email_institucional,
         })
 
 

@@ -27,7 +27,7 @@ def _base_queryset(user):
         return base.all()
     coord = get_coordenador(user)
     if coord is not None:
-        cursos = coord.cursos_coordenados.all()
+        cursos = coord.cursos.all()
         return base.filter(aluno__curso__in=cursos)
     return ProcessoEstagio.objects.none()
 
@@ -161,7 +161,7 @@ class DashboardEstatisticasView(APIView):
 
         secoes_agregadas = {}
         if coord is not None:
-            cursos = coord.cursos_coordenados.all()
+            cursos = coord.cursos.all()
             modelo = ModeloFormulario.objects.filter(curso__in=cursos, ativo=True).order_by('-criado_em').first()
             if modelo:
                 processos_com_resp = [p for p in processos if p.respostas_formulario is not None]

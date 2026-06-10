@@ -1,6 +1,9 @@
 """
 Script de população do banco com dados realistas IBMEC.
 
+Modelo: login por email_institucional. O `username` é derivado automaticamente
+do email pelo override de Usuario.save().
+
 Modos de execução:
     python3 populate_db.py                        # standalone
     python3 manage.py shell < populate_db.py      # via Django shell
@@ -11,7 +14,7 @@ import random
 from datetime import date, timedelta
 from decimal import Decimal
 
-# ── Django setup (idempotente — funciona standalone e via shell) ─────────
+# ── Django setup idempotente ────────────────────────────────────────────
 try:
     from django.apps import apps as _apps
     if not _apps.ready:
@@ -31,334 +34,256 @@ from app.models import (
     ModeloFormulario,
 )
 
-random.seed(42)  # determinístico
-
+random.seed(42)
 PASSWORD = 'ibmec2026'
 
-# ── DADOS ───────────────────────────────────────────────────────────────
 
+def criar_usuario(email, password, tipo, nome, **kwargs):
+    """Helper: cria Usuario via create_user (faz hash da senha corretamente).
+
+    NUNCA usar Usuario.objects.create() — esse método salva a senha em texto
+    puro e o login quebra. Sempre create_user (ou create_superuser para admin).
+    """
+    return Usuario.objects.create_user(
+        username=email,                # auto-sincronizado pelo save() do Usuario
+        email_institucional=email,
+        password=password,             # create_user chama set_password internamente
+        tipo=tipo,
+        nome=nome,
+        **kwargs,
+    )
+
+
+# ── 14 CURSOS ──────────────────────────────────────────────────────────
 CURSOS = [
     ('Administração', 'adm'),
-    ('Arquitetura e Urbanismo', 'arq'),
-    ('Ciência de Dados e Inteligência Artificial', 'cdia'),
+    ('Ciências Contábeis', 'ctb'),
     ('Ciências Econômicas', 'eco'),
-    ('Publicidade e Propaganda', 'pub'),
     ('Direito', 'dir'),
-    ('Engenharia da Computação', 'engc'),
+    ('Relações Internacionais', 'ri'),
+    ('Comunicação Social – Publicidade e Propaganda', 'pub'),
+    ('Arquitetura e Urbanismo', 'arq'),
+    ('Engenharia Civil', 'engcv'),
+    ('Engenharia de Computação', 'engcc'),
+    ('Engenharia Mecânica', 'engmc'),
     ('Engenharia de Produção', 'engp'),
     ('Engenharia de Software', 'engs'),
-    ('Relações Internacionais', 'ri'),
+    ('Análise e Desenvolvimento de Sistemas', 'ads'),
+    ('Ciência de Dados e Inteligência Artificial', 'cdia'),
+    ('Defesa Cibernética', 'defc'),
 ]
 
-# (curso_idx, username, nome, departamento)
+# ── 8 COORDENADORES (1 coord pode coordenar N cursos) ──────────────────
+# (nome, email, lista de slugs de curso)
 COORDENADORES = [
-    (0, 'carlos.almeida',    'Carlos Eduardo Almeida',     'Administração'),
-    (1, 'mariana.ribeiro',   'Mariana Santos Ribeiro',     'Arquitetura'),
-    (2, 'joao.oliveira',     'João Pedro Oliveira',        'Computação'),
-    (3, 'patricia.carvalho', 'Patricia Mendes Carvalho',   'Economia'),
-    (4, 'fernando.lima',     'Fernando Augusto Lima',      'Comunicação'),
-    (5, 'beatriz.fernandes', 'Beatriz Cardoso Fernandes',  'Direito'),
-    (6, 'ricardo.pereira',   'Ricardo Souza Pereira',      'Computação'),
-    (7, 'camila.silva',      'Camila Rodrigues Silva',     'Engenharia'),
-    (8, 'lucas.costa',       'Lucas Martins Costa',        'Computação'),
-    (9, 'adriana.vieira',    'Adriana Pinheiro Vieira',    'Relações Internacionais'),
+    ('Talita de Oliveira Trindade',  'talita.trindade@ibmec.edu.br',    ['adm', 'ctb']),
+    ('Gustavo Herkenhoff Moreira',   'gustavo.moreira@ibmec.edu.br',    ['eco']),
+    ('Michele Pedrosa Paumgartten',  'michele.paumgartten@ibmec.edu.br',['dir']),
+    ('Renato Salgado Mendes',        'renato.mendes@ibmec.edu.br',      ['ri']),
+    ('Victor Azevedo',               'victor.azevedo@ibmec.edu.br',     ['pub']),
+    ('Ticianne Ribeiro de Souza',    'ticianne.souza@ibmec.edu.br',     ['arq']),
+    ('Clayton Jones Alves da Silva', 'clayton.silva@ibmec.edu.br',      ['engcv', 'engcc', 'engmc', 'engp', 'engs']),
+    ('Thiago Silva de Souza',        'thiago.souza@ibmec.edu.br',       ['ads', 'cdia', 'defc']),
 ]
 
-# (curso_idx, username, nome) — 2 por curso
-ALUNOS = [
-    (0, 'gabriel.silva',     'Gabriel Henrique Silva'),
-    (0, 'sofia.andrade',     'Sofia Maria Andrade'),
-    (1, 'fernanda.castro',   'Fernanda Oliveira Castro'),
-    (1, 'rafael.borges',     'Rafael Lima Borges'),
-    (2, 'pedro.reis',        'Pedro Vinícius Reis'),
-    (2, 'isabella.nunes',    'Isabella Cristina Nunes'),
-    (3, 'bruno.cavalcanti',  'Bruno Sales Cavalcanti'),
-    (3, 'larissa.moura',     'Larissa Helena Moura'),
-    (4, 'mateus.domingues',  'Mateus Alves Domingues'),
-    (4, 'camilla.teixeira',  'Camilla Barbosa Teixeira'),
-    (5, 'vinicius.ramos',    'Vinícius Aparecido Ramos'),
-    (5, 'julia.couto',       'Júlia Beatriz Couto'),
-    (6, 'thiago.pacheco',    'Thiago Mendes Pacheco'),
-    (6, 'beatriz.aragao',    'Beatriz Souza Aragão'),
-    (7, 'andre.macedo',      'André Costa Macedo'),
-    (7, 'mariana.faria',     'Mariana Lucena Faria'),
-    (8, 'felipe.brito',      'Felipe Carvalho Brito'),
-    (8, 'renata.vieira',     'Renata Lopes Vieira'),
-    (9, 'eduardo.monteiro',  'Eduardo Tavares Monteiro'),
-    (9, 'manuela.barros',    'Manuela Coelho Barros'),
+# ── VISÃO GLOBAL ────────────────────────────────────────────────────────
+VISAO_GLOBAL_USERS = [
+    ('Ana Paula Mendes',         'ana.mendes@ibmec.edu.br',        'secretaria'),
+    ('Carlos Eduardo Souza',     'carlos.souza@ibmec.edu.br',      'casa'),
+    ('Roberto Figueiredo',       'roberto.figueiredo@ibmec.edu.br','reitor'),
+    ('Claudia Amaral',           'claudia.amaral@ibmec.edu.br',    'pro_reitor'),
 ]
 
+# ── 30 ALUNOS (2 por curso) ─────────────────────────────────────────────
+# (nome, email_local, slug_curso, periodo, cr)
+ALUNOS_SPEC = [
+    # adm
+    ('Pedro Henrique Alves',     'pedro.alves',      'adm',   6, 7.80),
+    ('Juliana Ferreira Santos',  'juliana.santos',   'adm',   8, 8.50),
+    # ctb
+    ('Rafael Tavares Lemos',     'rafael.lemos',     'ctb',   5, 7.40),
+    ('Beatriz Almeida Soares',   'beatriz.soares',   'ctb',   7, 8.10),
+    # eco
+    ('Bruno Cavalcanti Lima',    'bruno.cavalcanti', 'eco',   7, 7.20),
+    ('Larissa Moura Teixeira',   'larissa.moura',    'eco',   9, 8.90),
+    # dir
+    ('Rodrigo Nascimento Pinto', 'rodrigo.nascimento','dir', 10, 9.20),
+    ('Amanda Cristina Lopes',    'amanda.lopes',     'dir',   8, 8.40),
+    # ri
+    ('Sophia Marques Duarte',    'sophia.marques',   'ri',    7, 9.00),
+    ('André Luis Fonseca',       'andre.fonseca',    'ri',    5, 7.10),
+    # pub
+    ('Mateus Domingues Faria',   'mateus.domingues', 'pub',   4, 6.90),
+    ('Camilla Teixeira Vaz',     'camilla.teixeira', 'pub',   6, 7.60),
+    # arq
+    ('Fernanda Oliveira Castro', 'fernanda.castro',  'arq',   8, 8.20),
+    ('Gabriel Rocha Mendes',     'gabriel.mendes',   'arq',   6, 7.40),
+    # engcv
+    ('Lucas Pereira Maia',       'lucas.maia',       'engcv', 7, 7.90),
+    ('Mariana Borges Ramos',     'mariana.borges',   'engcv', 5, 8.30),
+    # engcc
+    ('Thiago Martins Andrade',   'thiago.martins',   'engcc', 6, 8.10),
+    ('Natália Correia Souza',    'natalia.correia',  'engcc', 8, 7.80),
+    # engmc
+    ('Eduardo Vieira Campos',    'eduardo.campos',   'engmc', 6, 7.50),
+    ('Renata Pinheiro Cardoso',  'renata.cardoso',   'engmc', 9, 8.80),
+    # engp
+    ('Felipe Augusto Gomes',     'felipe.gomes',     'engp',  5, 7.30),
+    ('Bianca Cardoso Nogueira',  'bianca.cardoso',   'engp',  7, 8.60),
+    # engs
+    ('Diego Henrique Barros',    'diego.barros',     'engs',  4, 8.80),
+    ('Letícia Prado Monteiro',   'leticia.monteiro', 'engs',  6, 7.50),
+    # ads
+    ('Vinicius Souza Antunes',   'vinicius.antunes', 'ads',   3, 7.20),
+    ('Camila Ribeiro Faria',     'camila.faria',     'ads',   5, 8.00),
+    # cdia
+    ('Pedro Vinícius Reis',      'pedro.reis',       'cdia',  3, 9.10),
+    ('Isabella Nunes Carvalho',  'isabella.nunes',   'cdia',  5, 8.70),
+    # defc
+    ('Marcelo Aguiar Brito',     'marcelo.brito',    'defc',  4, 8.40),
+    ('Carolina Lima Tavares',    'carolina.lima',    'defc',  6, 7.70),
+]
+
+# ── 8 EMPRESAS ──────────────────────────────────────────────────────────
 EMPRESAS = [
     {
-        'razao_social': 'Tech Solutions Ltda',
-        'cnpj': '12.345.678/0001-90',
+        'razao_social': 'Tech Solutions Ltda', 'cnpj': '12.345.678/0001-90',
         'areas_atuacao': 'Tecnologia · Desenvolvimento de Software · Dados',
-        'localizacao': 'Rio de Janeiro, RJ',
-        'email_contato': 'contato@techsolutions.com.br',
-        'responsavel_legal_nome': 'Roberto Mendes Cardoso',
-        'responsavel_legal_cargo': 'Diretor Executivo',
-        'descricao': 'Empresa de tecnologia com foco em soluções de software para setores financeiro e educacional.',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'contato@techsolutions.com.br',
+        'responsavel_legal_nome': 'Roberto Mendes Cardoso', 'responsavel_legal_cargo': 'Diretor Executivo',
+        'descricao': 'Empresa de tecnologia com foco em soluções de software.',
     },
     {
-        'razao_social': 'Construtora Horizonte S.A.',
-        'cnpj': '23.456.789/0001-01',
+        'razao_social': 'Construtora Horizonte S.A.', 'cnpj': '23.456.789/0001-01',
         'areas_atuacao': 'Construção Civil · Engenharia · Projetos Estruturais',
-        'localizacao': 'Rio de Janeiro, RJ',
-        'email_contato': 'rh@horizonte.com.br',
-        'responsavel_legal_nome': 'Cláudia Lima Vasconcellos',
-        'responsavel_legal_cargo': 'Presidente',
-        'descricao': 'Construtora atuante em obras residenciais e comerciais no estado do RJ.',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'rh@horizonte.com.br',
+        'responsavel_legal_nome': 'Cláudia Lima Vasconcellos', 'responsavel_legal_cargo': 'Presidente',
+        'descricao': 'Construtora atuante em obras residenciais e comerciais.',
     },
     {
-        'razao_social': 'Banco Capital Investimentos',
-        'cnpj': '34.567.890/0001-12',
+        'razao_social': 'Banco Capital Investimentos', 'cnpj': '34.567.890/0001-12',
         'areas_atuacao': 'Finanças · Mercado de Capitais · Wealth Management',
-        'localizacao': 'São Paulo, SP',
-        'email_contato': 'estagio@bancocapital.com.br',
-        'responsavel_legal_nome': 'Henrique Sampaio Marques',
-        'responsavel_legal_cargo': 'CEO',
-        'descricao': 'Banco de investimentos focado em wealth management e operações de M&A.',
+        'localizacao': 'São Paulo, SP', 'email_contato': 'estagio@bancocapital.com.br',
+        'responsavel_legal_nome': 'Henrique Sampaio Marques', 'responsavel_legal_cargo': 'CEO',
+        'descricao': 'Banco de investimentos focado em wealth management e M&A.',
     },
     {
-        'razao_social': 'Agência Criativa Digital',
-        'cnpj': '45.678.901/0001-23',
+        'razao_social': 'Agência Criativa Digital', 'cnpj': '45.678.901/0001-23',
         'areas_atuacao': 'Marketing · Publicidade · Comunicação Digital',
-        'localizacao': 'Rio de Janeiro, RJ',
-        'email_contato': 'rh@agcriativa.com.br',
-        'responsavel_legal_nome': 'Patrícia Lobo Fernandes',
-        'responsavel_legal_cargo': 'CEO',
-        'descricao': 'Agência full-service focada em marketing digital e branding.',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'rh@agcriativa.com.br',
+        'responsavel_legal_nome': 'Patrícia Lobo Fernandes', 'responsavel_legal_cargo': 'CEO',
+        'descricao': 'Agência full-service de marketing digital e branding.',
     },
     {
-        'razao_social': 'Escritório Machado & Associados',
-        'cnpj': '56.789.012/0001-34',
+        'razao_social': 'Escritório Machado & Associados', 'cnpj': '56.789.012/0001-34',
         'areas_atuacao': 'Advocacia · Direito Empresarial · Contencioso',
-        'localizacao': 'Rio de Janeiro, RJ',
-        'email_contato': 'contato@machadoassoc.adv.br',
-        'responsavel_legal_nome': 'José Machado Filho',
-        'responsavel_legal_cargo': 'Sócio Fundador',
-        'descricao': 'Escritório de advocacia full-service com atuação em direito empresarial.',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'contato@machadoassoc.adv.br',
+        'responsavel_legal_nome': 'José Machado Filho', 'responsavel_legal_cargo': 'Sócio Fundador',
+        'descricao': 'Escritório de advocacia full-service.',
     },
     {
-        'razao_social': 'Global Trade Consultoria',
-        'cnpj': '67.890.123/0001-45',
+        'razao_social': 'Global Trade Consultoria', 'cnpj': '67.890.123/0001-45',
         'areas_atuacao': 'Comércio Exterior · Logística Internacional',
-        'localizacao': 'Rio de Janeiro, RJ',
-        'email_contato': 'rh@globaltrade.com.br',
-        'responsavel_legal_nome': 'Ana Paula Aguiar',
-        'responsavel_legal_cargo': 'Diretora de Operações',
-        'descricao': 'Consultoria em comércio exterior e estratégias de internacionalização.',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'rh@globaltrade.com.br',
+        'responsavel_legal_nome': 'Ana Paula Aguiar', 'responsavel_legal_cargo': 'Diretora de Operações',
+        'descricao': 'Consultoria em comércio exterior e internacionalização.',
+    },
+    {
+        'razao_social': 'Indústria Metalúrgica Aço Forte', 'cnpj': '78.901.234/0001-56',
+        'areas_atuacao': 'Engenharia · Metalurgia · Fabricação Industrial',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'rh@acoforte.ind.br',
+        'responsavel_legal_nome': 'Marcos Henrique Pereira', 'responsavel_legal_cargo': 'Diretor Industrial',
+        'descricao': 'Indústria metalúrgica com operações de transformação e usinagem.',
+    },
+    {
+        'razao_social': 'DataMind Analytics', 'cnpj': '89.012.345/0001-67',
+        'areas_atuacao': 'Dados · Inteligência Artificial · BI',
+        'localizacao': 'Rio de Janeiro, RJ', 'email_contato': 'rh@datamind.ai',
+        'responsavel_legal_nome': 'Letícia Sampaio Furtado', 'responsavel_legal_cargo': 'CEO',
+        'descricao': 'Consultoria em ciência de dados e modelos de IA aplicada.',
     },
 ]
 
-# (empresa_idx, username, nome, cargo)
+# ── 8 SUPERVISORES (1 por empresa) ──────────────────────────────────────
+# (nome, email, empresa_idx, cargo)
 SUPERVISORES = [
-    (0, 'marcos.santiago',  'Marcos Vinícius Santiago',   'Diretor de Tecnologia'),
-    (1, 'eliana.branco',    'Eliana Cristina Branco',     'Engenheira Sênior'),
-    (2, 'antonio.macedo',   'Antonio Carlos Macedo',      'Gerente de Operações'),
-    (3, 'daniela.rangel',   'Daniela Souza Rangel',       'Diretora Criativa'),
-    (4, 'roberto.pinto',    'Roberto Almeida Pinto',      'Sócio Advogado'),
-    (5, 'vanessa.cardoso',  'Vanessa Lima Cardoso',       'Gerente de Comércio Exterior'),
+    ('Marcos Vinícius Santiago', 'marcos.santiago@techsolutions.com.br', 0, 'Diretor de Tecnologia'),
+    ('Eliana Cristina Branco',   'eliana.branco@horizonte.com.br',       1, 'Engenheira Sênior'),
+    ('Antonio Carlos Macedo',    'antonio.macedo@bancocapital.com.br',   2, 'Gerente de Operações'),
+    ('Daniela Souza Rangel',     'daniela.rangel@agcriativa.com.br',     3, 'Diretora Criativa'),
+    ('Roberto Almeida Pinto',    'roberto.pinto@machadoassoc.adv.br',    4, 'Sócio Advogado'),
+    ('Vanessa Lima Cardoso',     'vanessa.cardoso@globaltrade.com.br',   5, 'Gerente de Comex'),
+    ('Paulo Roberto Magalhães',  'paulo.magalhaes@acoforte.ind.br',      6, 'Coordenador de Engenharia'),
+    ('Mariana Tavares Coelho',   'mariana.tavares@datamind.ai',          7, 'Líder de Data Science'),
 ]
 
 
+# ── CPFs/RGs fictícios determinísticos ──────────────────────────────────
 def fake_cpf(i):
-    return f'{(100 + i):03d}.{(200 + i * 3) % 1000:03d}.{(300 + i * 5) % 1000:03d}-{(10 + i) % 100:02d}'
+    return f'{(100+i):03d}.{(200+i*3) % 1000:03d}.{(300+i*5) % 1000:03d}-{(10+i) % 100:02d}'
 
 
 def fake_rg(i):
-    return f'{(10 + i) % 100:02d}.{(100 + i * 2) % 1000:03d}.{(200 + i * 3) % 1000:03d}-{i % 10}'
+    return f'{(10+i) % 100:02d}.{(100+i*2) % 1000:03d}.{(200+i*3) % 1000:03d}-{i % 10}'
 
 
-# ── Definições por curso para as seções 3, 4 e 5 ───────────────────────────
+def fake_matricula(i):
+    return f'2023{(100000 + i*137) % 1000000:06d}'
 
-# Seção 3 — Área de Atuação (itens)
+
+# ── Especialização por curso para seções do formulário ──────────────────
 AREAS_POR_CURSO = {
-    'arq': [
-        'Interiores residenciais', 'Interiores comerciais',
-        'Edificações residenciais', 'Edificações comerciais',
-        'Edificações turismo/lazer', 'Edificações de saúde',
-        'Edificações industriais', 'Restauração/patrimônio',
-        'Projeto urbano', 'Planejamento urbano',
-        'Paisagismo', 'Meio ambiente',
-        'Projetos complementares (elétrica/hidro)',
-        'Projetos complementares (gás/incêndio)',
-        'Projetos complementares (estrutural)',
-    ],
-    'cdia': [
-        'Análise exploratória de dados', 'Engenharia de dados / ETL',
-        'Machine Learning supervisionado', 'Machine Learning não supervisionado',
-        'Deep Learning / redes neurais', 'NLP / processamento de linguagem',
-        'Computer Vision', 'Estatística aplicada',
-        'Visualização e BI', 'MLOps / deploy de modelos',
-    ],
-    'engs': [
-        'Backend / APIs', 'Frontend web', 'Mobile',
-        'DevOps / CI/CD', 'Banco de dados',
-        'Cloud / infraestrutura', 'Arquitetura de software',
-        'Qualidade / testes automatizados', 'Segurança de aplicações',
-        'UX / Design de produto',
-    ],
-    'engc': [
-        'Hardware / sistemas embarcados', 'Redes de computadores',
-        'Sistemas operacionais', 'Segurança / criptografia',
-        'Cloud / infraestrutura', 'Backend / APIs',
-        'Banco de dados', 'IoT', 'Inteligência artificial',
-    ],
-    'engp': [
-        'PCP (planejamento e controle)', 'Qualidade',
-        'Lean / melhoria contínua', 'Logística',
-        'Gestão de projetos', 'Gestão da cadeia de suprimentos',
-        'Custos', 'Manutenção', 'Ergonomia / segurança do trabalho',
-        'Sustentabilidade',
-    ],
-    'adm': [
-        'Gestão de pessoas', 'Recrutamento e seleção',
-        'Finanças corporativas', 'Controladoria',
-        'Marketing', 'Vendas', 'Operações', 'Logística',
-        'Estratégia', 'Inteligência de mercado',
-    ],
-    'eco': [
-        'Macroeconomia', 'Microeconomia', 'Econometria',
-        'Mercado financeiro', 'Análise de risco',
-        'Pesquisa econômica', 'Política pública',
-        'Comércio internacional', 'Setor público',
-    ],
-    'pub': [
-        'Planejamento de campanha', 'Criação / direção de arte',
-        'Redação publicitária', 'Mídia paga', 'Mídias sociais',
-        'Branding', 'Conteúdo', 'Atendimento / contas',
-        'Audiovisual', 'Métricas / performance',
-    ],
-    'dir': [
-        'Direito civil', 'Direito empresarial', 'Direito trabalhista',
-        'Direito tributário', 'Direito penal', 'Direito administrativo',
-        'Direito do consumidor', 'Contencioso', 'Consultivo',
-        'Compliance / LGPD',
-    ],
-    'ri': [
-        'Política externa', 'Comércio exterior',
-        'Cooperação internacional', 'Diplomacia',
-        'Organismos internacionais', 'Análise de cenários',
-        'Negociação internacional', 'Geopolítica',
-        'Direito internacional', 'Inteligência de mercado',
-    ],
+    'arq':   ['Interiores residenciais', 'Interiores comerciais', 'Edificações residenciais', 'Edificações comerciais', 'Restauração/patrimônio', 'Paisagismo', 'Projetos complementares'],
+    'cdia':  ['Análise exploratória', 'ML supervisionado', 'ML não supervisionado', 'NLP', 'Computer Vision', 'BI/visualização', 'Engenharia de dados'],
+    'engs':  ['Backend / APIs', 'Frontend web', 'Mobile', 'DevOps / CI/CD', 'Banco de dados', 'Cloud', 'QA / testes'],
+    'engcc': ['Sistemas embarcados', 'Redes', 'Sistemas operacionais', 'Segurança', 'IoT', 'Cloud', 'IA'],
+    'engcv': ['Estruturas', 'Geotecnia', 'Hidráulica', 'Saneamento', 'Construção', 'Orçamento'],
+    'engmc': ['Projeto mecânico', 'Manufatura', 'Manutenção', 'Termodinâmica', 'Materiais', 'Automação'],
+    'engp':  ['PCP', 'Qualidade', 'Lean', 'Logística', 'Custos', 'Gestão de projetos'],
+    'ads':   ['Backend', 'Frontend', 'Banco de dados', 'DevOps', 'Cloud', 'Testes'],
+    'defc':  ['Pentest', 'SOC / monitoramento', 'Resposta a incidentes', 'Criptografia', 'Hardening', 'Compliance / LGPD'],
+    'adm':   ['Gestão de pessoas', 'Finanças', 'Marketing', 'Operações', 'Estratégia', 'Logística'],
+    'ctb':   ['Contabilidade societária', 'Tributária', 'Auditoria', 'Custos', 'Controladoria', 'Análise de balanços'],
+    'eco':   ['Macroeconomia', 'Microeconomia', 'Econometria', 'Mercado financeiro', 'Análise de risco', 'Setor público'],
+    'pub':   ['Planejamento de campanha', 'Criação', 'Redação', 'Mídia paga', 'Branding', 'Métricas'],
+    'dir':   ['Civil', 'Empresarial', 'Trabalhista', 'Tributário', 'Contencioso', 'Consultivo'],
+    'ri':    ['Política externa', 'Comércio exterior', 'Cooperação internacional', 'Diplomacia', 'Análise de cenários'],
 }
 
-# Seção 4 — Aplicação do Conhecimento (disciplinas)
 DISCIPLINAS_POR_CURSO = {
-    'arq': [
-        'Disciplinas de Projeto', 'Disciplinas de Teoria e História',
-        'Disciplinas de Estruturas',
-        'Disciplinas de Técnicas (conforto, ecologia, materiais)',
-        'Disciplinas de Instalações (hidrossanitárias, elétricas)',
-        'Disciplinas de Desenho a mão',
-    ],
-    'cdia': [
-        'Estatística e Probabilidade', 'Cálculo / Álgebra Linear',
-        'Programação (Python)', 'Banco de Dados',
-        'Machine Learning', 'Visualização de Dados',
-        'Metodologia de pesquisa',
-    ],
-    'engs': [
-        'Algoritmos e Estrutura de Dados', 'Programação',
-        'Engenharia de Software', 'Banco de Dados',
-        'Redes', 'Sistemas Distribuídos', 'Gestão de Projetos',
-    ],
-    'engc': [
-        'Algoritmos', 'Programação', 'Sistemas Digitais',
-        'Redes', 'Sistemas Operacionais',
-        'Eletrônica', 'Cálculo / Física',
-    ],
-    'engp': [
-        'Pesquisa Operacional', 'Estatística e Qualidade',
-        'PCP', 'Logística', 'Cálculo / Física',
-        'Gestão de Projetos', 'Gestão de Pessoas',
-    ],
-    'adm': [
-        'Gestão de Pessoas', 'Finanças', 'Marketing',
-        'Contabilidade', 'Estratégia', 'Operações',
-        'Direito Empresarial',
-    ],
-    'eco': [
-        'Macroeconomia', 'Microeconomia', 'Econometria',
-        'Estatística', 'Cálculo', 'Finanças',
-        'História Econômica',
-    ],
-    'pub': [
-        'Teoria da Comunicação', 'Redação Publicitária',
-        'Criação / Direção de Arte', 'Mídia',
-        'Pesquisa de Mercado', 'Branding',
-        'Audiovisual',
-    ],
-    'dir': [
-        'Direito Civil', 'Direito Empresarial', 'Direito Trabalhista',
-        'Direito Constitucional', 'Direito Processual',
-        'Teoria Geral do Direito', 'Direito Tributário',
-    ],
-    'ri': [
-        'Teoria das Relações Internacionais', 'Política Externa Brasileira',
-        'Economia Internacional', 'Direito Internacional',
-        'História Contemporânea', 'Negociação',
-        'Análise de Conjuntura',
-    ],
+    'arq':   ['Projeto', 'Teoria e História', 'Estruturas', 'Conforto/Materiais', 'Instalações', 'Desenho a mão'],
+    'cdia':  ['Estatística', 'Cálculo', 'Programação', 'Banco de Dados', 'Machine Learning', 'Visualização'],
+    'engs':  ['Algoritmos', 'Engenharia de Software', 'Banco de Dados', 'Redes', 'Sistemas Distribuídos'],
+    'engcc': ['Algoritmos', 'Programação', 'Sistemas Digitais', 'Redes', 'Eletrônica', 'Cálculo'],
+    'engcv': ['Cálculo', 'Mecânica', 'Estruturas', 'Hidráulica', 'Topografia', 'Materiais'],
+    'engmc': ['Cálculo', 'Termodinâmica', 'Mecânica dos Fluidos', 'Mecanismos', 'Materiais', 'Manufatura'],
+    'engp':  ['Pesquisa Operacional', 'Estatística e Qualidade', 'PCP', 'Logística', 'Gestão de Projetos'],
+    'ads':   ['Algoritmos', 'Programação', 'Banco de Dados', 'Web', 'Redes', 'Gestão de Projetos'],
+    'defc':  ['Redes', 'Sistemas Operacionais', 'Criptografia', 'Programação', 'Computação Forense', 'Hardening'],
+    'adm':   ['Gestão de Pessoas', 'Finanças', 'Marketing', 'Contabilidade', 'Estratégia', 'Operações'],
+    'ctb':   ['Contabilidade Geral', 'Custos', 'Tributária', 'Societária', 'Auditoria', 'Controladoria'],
+    'eco':   ['Macroeconomia', 'Microeconomia', 'Econometria', 'Estatística', 'Cálculo', 'Finanças'],
+    'pub':   ['Teoria da Comunicação', 'Redação Publicitária', 'Mídia', 'Branding', 'Pesquisa de Mercado'],
+    'dir':   ['Civil', 'Empresarial', 'Trabalhista', 'Constitucional', 'Processual', 'Tributário'],
+    'ri':    ['Teoria das RI', 'Política Externa Brasileira', 'Economia Internacional', 'Direito Internacional'],
 }
 
-# Seção 5 — Softwares (itens). Cada um é nivelado em básico/avançado quando faz sentido.
 SOFTWARES_POR_CURSO = {
-    'arq': [
-        'Word básico', 'Word avançado',
-        'Excel básico', 'Excel avançado',
-        'AutoCAD básico', 'AutoCAD avançado',
-        'SketchUp básico', 'SketchUp avançado',
-        'VRay básico', 'VRay avançado',
-        'Revit básico', 'Revit avançado',
-        'Google Earth', 'QGIS', 'Promob', 'ArchiCAD',
-    ],
-    'cdia': [
-        'Python básico', 'Python avançado',
-        'SQL básico', 'SQL avançado',
-        'R / Stata', 'Git', 'Power BI', 'Tableau',
-        'Docker', 'AWS / GCP', 'Excel avançado',
-    ],
-    'engs': [
-        'Python', 'JavaScript / TypeScript', 'Java / Kotlin',
-        'SQL', 'Git', 'Docker', 'Kubernetes',
-        'AWS / Azure / GCP', 'Linux',
-    ],
-    'engc': [
-        'C / C++', 'Python', 'Java', 'SQL',
-        'Linux', 'Git', 'Docker', 'Wireshark', 'VHDL / Verilog',
-    ],
-    'engp': [
-        'Excel básico', 'Excel avançado', 'Power BI',
-        'MS Project', 'AutoCAD', 'SAP', 'Minitab',
-        'Python (análise de dados)',
-    ],
-    'adm': [
-        'Excel básico', 'Excel avançado',
-        'Power BI', 'SAP', 'Word', 'PowerPoint',
-        'CRM (Salesforce, HubSpot)',
-    ],
-    'eco': [
-        'Excel básico', 'Excel avançado',
-        'R / Stata', 'Python', 'Bloomberg',
-        'EViews', 'Power BI',
-    ],
-    'pub': [
-        'Photoshop', 'Illustrator', 'InDesign',
-        'After Effects', 'Premiere', 'Figma',
-        'Meta Ads / Google Ads',
-    ],
-    'dir': [
-        'Processo Eletrônico (PJe)', 'JusBrasil',
-        'LexML', 'Word', 'Excel',
-        'CRM jurídico',
-    ],
-    'ri': [
-        'Excel', 'Word', 'PowerPoint',
-        'Bloomberg', 'Inglês avançado', 'Espanhol',
-    ],
+    'arq':   ['Word', 'Excel', 'AutoCAD', 'SketchUp', 'Revit', 'Photoshop', 'VRay'],
+    'cdia':  ['Python básico', 'Python avançado', 'SQL', 'R', 'Power BI', 'Git', 'Docker'],
+    'engs':  ['Python', 'JavaScript', 'Java', 'SQL', 'Git', 'Docker', 'Kubernetes'],
+    'engcc': ['C/C++', 'Python', 'Java', 'SQL', 'Linux', 'Wireshark', 'Git'],
+    'engcv': ['Excel', 'AutoCAD', 'Revit', 'SAP2000', 'Eberick', 'Project'],
+    'engmc': ['SolidWorks', 'AutoCAD', 'Inventor', 'Matlab', 'Ansys', 'Excel'],
+    'engp':  ['Excel', 'Power BI', 'MS Project', 'SAP', 'Minitab', 'Python'],
+    'ads':   ['Python', 'JavaScript', 'SQL', 'Git', 'Docker', 'Linux'],
+    'defc':  ['Linux', 'Wireshark', 'Nmap', 'Burp Suite', 'Python', 'Splunk'],
+    'adm':   ['Excel', 'Power BI', 'SAP', 'Word', 'PowerPoint', 'CRM'],
+    'ctb':   ['Excel avançado', 'SAP', 'Sistema Contábil', 'eSocial', 'SPED'],
+    'eco':   ['Excel', 'R', 'Stata', 'Python', 'Bloomberg', 'Power BI'],
+    'pub':   ['Photoshop', 'Illustrator', 'InDesign', 'After Effects', 'Premiere', 'Figma'],
+    'dir':   ['PJe', 'JusBrasil', 'LexML', 'Word', 'Excel'],
+    'ri':    ['Excel', 'Word', 'PowerPoint', 'Bloomberg', 'Inglês avançado'],
 }
 
 ITENS_COMPORTAMENTAIS_DETALHADOS = [
@@ -370,63 +295,35 @@ ITENS_COMPORTAMENTAIS_DETALHADOS = [
 ITENS_COMPORTAMENTAIS = [d['nome'] for d in ITENS_COMPORTAMENTAIS_DETALHADOS]
 
 ITENS_EXPERIENCIA = [
-    'Atividades vs formação acadêmica',
-    'Orientação do supervisor',
-    'Feedback do supervisor',
-    'Condições de trabalho',
-    'Remuneração vs mercado',
-    'Relacionamento com equipe',
-    'Sua produtividade',
-    'Indicaria a empresa',
+    'Atividades vs formação acadêmica', 'Orientação do supervisor', 'Feedback do supervisor',
+    'Condições de trabalho', 'Remuneração vs mercado', 'Relacionamento com equipe',
+    'Sua produtividade', 'Indicaria a empresa',
 ]
-
-# Compat: ferramentas_por_curso e aplicacao_por_curso continuam exportados
-def ferramentas_por_curso(slug):
-    return SOFTWARES_POR_CURSO.get(slug, ['Excel', 'Word', 'PowerPoint', 'Outlook', 'Teams'])
-
-def aplicacao_por_curso(slug):
-    return DISCIPLINAS_POR_CURSO.get(slug, ['Disciplina 1', 'Disciplina 2', 'Disciplina 3'])
 
 
 def gerar_modelo_secoes(slug):
-    """Modelo de formulário alinhado ao docx oficial do PO — 7 seções."""
+    """Modelo de formulário alinhado ao docx oficial — 7 seções."""
     return [
         {
-            'id': 'estagiario',
-            'tipo': 'auto',
-            'titulo': '1. Estagiário / Aluno',
-            'itens': [
-                'Nome', 'Matrícula', 'Curso', 'Semestre atual',
-                'Data de entrada', 'Data de saída',
-                'Horas/semana', 'Semanas trabalhadas',
-                'Horas totais', 'Remuneração média mensal',
-            ],
+            'id': 'estagiario', 'tipo': 'auto', 'titulo': '1. Estagiário / Aluno',
+            'itens': ['Nome', 'Matrícula', 'Curso', 'Semestre atual', 'Data de entrada', 'Data de saída',
+                      'Horas/semana', 'Semanas trabalhadas', 'Horas totais', 'Remuneração média mensal'],
             'grafico': 'nenhum',
         },
         {
-            'id': 'empresa',
-            'tipo': 'auto',
-            'titulo': '2. Concedente / Empresa',
+            'id': 'empresa', 'tipo': 'auto', 'titulo': '2. Concedente / Empresa',
             'itens': ['Empresa', 'Telefone', 'Website', 'Gestor direto', 'Email do gestor'],
             'grafico': 'nenhum',
         },
         {
-            'id': 'area_atuacao',
-            'tipo': 'checkbox_duplo',
-            'titulo': '3. Área de Atuação',
+            'id': 'area_atuacao', 'tipo': 'checkbox_duplo', 'titulo': '3. Área de Atuação',
             'itens': AREAS_POR_CURSO.get(slug, AREAS_POR_CURSO['adm']),
-            'colunas': [
-                'Atuação da empresa: Obra',
-                'Atuação da empresa: Projeto',
-                'Sua atuação: Obra',
-                'Sua atuação: Projeto',
-            ],
+            'colunas': ['Atuação da empresa: Obra', 'Atuação da empresa: Projeto', 'Sua atuação: Obra', 'Sua atuação: Projeto'],
             'grafico': 'barras_agrupadas',
             'campo_texto': 'Descreva as principais atividades desenvolvidas no seu estágio',
         },
         {
-            'id': 'aplicacao_conhecimento',
-            'tipo': 'escala_3',
+            'id': 'aplicacao_conhecimento', 'tipo': 'escala_3',
             'titulo': '4. Avaliação da Aplicação do Conhecimento',
             'descricao': 'Escolha se foi: Suficiente, Insuficiente ou Não utilizado',
             'itens': DISCIPLINAS_POR_CURSO.get(slug, DISCIPLINAS_POR_CURSO['adm']),
@@ -435,8 +332,7 @@ def gerar_modelo_secoes(slug):
             'campo_texto': 'Comentário sobre a aplicabilidade do conhecimento acadêmico',
         },
         {
-            'id': 'softwares',
-            'tipo': 'escala_1_4_multi',
+            'id': 'softwares', 'tipo': 'escala_1_4_multi',
             'titulo': '5. Utilização de Softwares',
             'descricao': '1-muito; 2-médio; 3-pouco; 4-nada',
             'itens': SOFTWARES_POR_CURSO.get(slug, SOFTWARES_POR_CURSO['adm']),
@@ -445,8 +341,7 @@ def gerar_modelo_secoes(slug):
             'campo_texto': 'Descreva sua experiência com o uso de softwares no estágio',
         },
         {
-            'id': 'comportamental',
-            'tipo': 'escala_1_4',
+            'id': 'comportamental', 'tipo': 'escala_1_4',
             'titulo': '6. Inteligência Comportamental',
             'descricao': '1-ruim; 2-regular; 3-bom; 4-ótimo',
             'itens_detalhados': ITENS_COMPORTAMENTAIS_DETALHADOS,
@@ -454,8 +349,7 @@ def gerar_modelo_secoes(slug):
             'grafico': 'radar',
         },
         {
-            'id': 'experiencia',
-            'tipo': 'escala_1_4',
+            'id': 'experiencia', 'tipo': 'escala_1_4',
             'titulo': '7. Avaliação da Experiência',
             'descricao': '1-ruim; 2-regular; 3-bom; 4-ótimo',
             'itens': ITENS_EXPERIENCIA,
@@ -468,63 +362,40 @@ def gerar_modelo_secoes(slug):
 
 
 def gerar_respostas(slug, qualidade='alta'):
-    """Gera respostas plausíveis no formato das seções acima."""
     base = 3 if qualidade == 'alta' else 2
+    nota = lambda: max(1, min(4, base + random.randint(-1, 1)))
 
-    def nota():
-        return max(1, min(4, base + random.randint(-1, 1)))
-
+    cols_area = ['Atuação da empresa: Obra', 'Atuação da empresa: Projeto', 'Sua atuação: Obra', 'Sua atuação: Projeto']
     areas = AREAS_POR_CURSO.get(slug, [])
-    cols_area = [
-        'Atuação da empresa: Obra', 'Atuação da empresa: Projeto',
-        'Sua atuação: Obra', 'Sua atuação: Projeto',
-    ]
     sec_areas = {}
     for it in random.sample(areas, k=min(4, len(areas))):
         sec_areas[it] = random.sample(cols_area, k=random.randint(1, 3))
-
-    disciplinas = DISCIPLINAS_POR_CURSO.get(slug, [])
-    sec_apl = {
-        it: random.choice(['Suficiente', 'Suficiente', 'Insuficiente', 'Não utilizado'])
-        for it in disciplinas
-    }
-
-    softs = SOFTWARES_POR_CURSO.get(slug, [])
-    sec_sw = {
-        it: {'Pela empresa': nota(), 'Por você': nota(), 'Se sentiu apto': nota()}
-        for it in random.sample(softs, k=min(6, len(softs)))
-    }
-
-    sec_comp = {it: nota() for it in ITENS_COMPORTAMENTAIS}
-    sec_exp = {it: nota() for it in ITENS_EXPERIENCIA}
 
     return {
         'preenchido_em': date.today().isoformat(),
         'tipo_relatorio': 'parcial',
         'secoes': {
             'area_atuacao': sec_areas,
-            'area_atuacao_texto': 'Atuei em projetos diversificados, com foco em entrega e qualidade.',
-            'aplicacao_conhecimento': sec_apl,
-            'aplicacao_conhecimento_texto': 'O conhecimento acadêmico foi essencial para a execução das atividades.',
-            'softwares': sec_sw,
-            'softwares_texto': 'Aprofundei o uso das ferramentas principais da área.',
-            'comportamental': sec_comp,
-            'experiencia': sec_exp,
+            'area_atuacao_texto': 'Trabalhei em projetos diversificados com foco em entregas reais.',
+            'aplicacao_conhecimento': {it: random.choice(['Suficiente', 'Suficiente', 'Insuficiente', 'Não utilizado'])
+                                       for it in DISCIPLINAS_POR_CURSO.get(slug, [])},
+            'aplicacao_conhecimento_texto': 'A base teórica foi muito útil durante o estágio.',
+            'softwares': {it: {'Pela empresa': nota(), 'Por você': nota(), 'Se sentiu apto': nota()}
+                          for it in random.sample(SOFTWARES_POR_CURSO.get(slug, []),
+                                                  k=min(5, len(SOFTWARES_POR_CURSO.get(slug, []))))},
+            'softwares_texto': 'Aprofundei o uso das ferramentas principais.',
+            'comportamental': {it: nota() for it in ITENS_COMPORTAMENTAIS},
+            'experiencia': {it: nota() for it in ITENS_EXPERIENCIA},
             'experiencia_efetivacao': random.choice(['Sim', 'Não']),
-            'experiencia_texto_positivo': (
-                'Equipe acolhedora e supervisor presente.' if qualidade == 'alta'
-                else 'Ambiente colaborativo.'
-            ),
-            'experiencia_texto_negativo': (
-                'Carga eventualmente intensa.' if qualidade == 'alta'
-                else 'Atividades pouco aderentes à formação em alguns momentos.'
-            ),
+            'experiencia_texto_positivo': 'Equipe acolhedora e bom acompanhamento.',
+            'experiencia_texto_negativo': 'Carga eventualmente intensa em períodos de pico.',
         }
     }
 
 
-# ── EXECUÇÃO ────────────────────────────────────────────────────────────
-
+# ════════════════════════════════════════════════════════════════════════
+#  EXECUÇÃO
+# ════════════════════════════════════════════════════════════════════════
 print('🧹 Limpando dados existentes…')
 LogDocumento.objects.all().delete()
 DocumentoProcesso.objects.all().delete()
@@ -532,136 +403,125 @@ ProcessoEstagio.objects.all().delete()
 ModeloFormulario.objects.all().delete()
 Aluno.objects.all().delete()
 SupervisorEmpresa.objects.all().delete()
-# Coordenadores precisam ser desvinculados dos cursos antes (FK PROTECT no Curso? Não, SET_NULL)
 Curso.objects.update(coordenador=None)
 Coordenador.objects.all().delete()
 EmpresaConcedente.objects.all().delete()
 Curso.objects.all().delete()
-Usuario.objects.filter(is_superuser=False).delete()
+Usuario.objects.all().delete()  # inclui superusers — vamos recriar admin abaixo
 
-print('👑 Garantindo superuser admin/admin…')
-admin, _ = Usuario.objects.get_or_create(username='admin')
-admin.is_superuser = True
-admin.is_staff = True
-admin.email = 'admin@ibmec.edu.br'
-admin.tipo = 'coordenador'
-admin.nome = 'Administrador IBMEC'
-admin.email_institucional = 'admin@ibmec.edu.br'
-admin.set_password('admin')
-admin.save()
+print('👑 Criando superuser admin@ibmec.edu.br / admin…')
+admin_user = Usuario.objects.create_superuser(
+    username='admin@ibmec.edu.br',
+    email_institucional='admin@ibmec.edu.br',
+    password='admin',
+    tipo='coordenador',
+    nome='Administrador IBMEC',
+)
 
-print('🏛  Criando usuários de visão global (Secretaria, CASA, Reitor, Pró-Reitor)…')
-VISAO_GLOBAL_USERS = [
-    ('ana.secretaria',     'Ana Paula Secretaria', 'secretaria'),
-    ('marcos.casa',        'Marcos CASA',          'casa'),
-    ('roberto.reitor',     'Roberto Reitor',       'reitor'),
-    ('claudia.proreitor',  'Cláudia Pró-Reitora',  'pro_reitor'),
-]
-for username, nome, tipo in VISAO_GLOBAL_USERS:
-    Usuario.objects.create_user(
-        username=username, password=PASSWORD, tipo=tipo,
-        nome=nome, email_institucional=f'{username}@ibmec.edu.br',
-    )
+print('🏛  Criando perfis de visão global (Secretaria, CASA, Reitor, Pró-Reitor)…')
+for nome, email, tipo in VISAO_GLOBAL_USERS:
+    criar_usuario(email, PASSWORD, tipo, nome)
 
-print('🎓 Criando cursos…')
-cursos = []
-for nome, _ in CURSOS:
-    cursos.append(Curso.objects.create(
+print('🎓 Criando 14 cursos…')
+cursos_by_slug = {}
+for nome, slug in CURSOS:
+    c = Curso.objects.create(
         nome=nome,
         carga_horaria_minima_total=300,
         carga_horaria_maxima_diaria=6,
-    ))
-
-print('👔 Criando coordenadores e vinculando aos cursos…')
-coordenadores = []
-for curso_idx, username, nome, departamento in COORDENADORES:
-    u = Usuario.objects.create_user(
-        username=username, password=PASSWORD, tipo='coordenador',
-        nome=nome, email_institucional=f'{username}@ibmec.edu.br',
     )
-    c = Coordenador.objects.create(usuario=u, departamento=departamento)
-    cursos[curso_idx].coordenador = c
-    cursos[curso_idx].save(update_fields=['coordenador'])
-    coordenadores.append(c)
+    cursos_by_slug[slug] = c
 
-print('👨‍🎓 Criando alunos…')
-alunos = []
-for idx, (curso_idx, username, nome) in enumerate(ALUNOS):
-    u = Usuario.objects.create_user(
-        username=username, password=PASSWORD, tipo='aluno',
-        nome=nome, email_institucional=f'{username}@aluno.ibmec.edu.br',
-    )
+print('👔 Criando 8 coordenadores e vinculando cursos…')
+coords_by_email = {}
+for nome, email, slugs in COORDENADORES:
+    u = criar_usuario(email, PASSWORD, 'coordenador', nome)
+    c = Coordenador.objects.create(usuario=u, departamento=', '.join(s.upper() for s in slugs))
+    coords_by_email[email] = c
+    for slug in slugs:
+        cursos_by_slug[slug].coordenador = c
+        cursos_by_slug[slug].save(update_fields=['coordenador'])
+
+print('👨‍🎓 Criando 30 alunos (2 por curso)…')
+alunos_by_email = {}
+for idx, (nome, email_local, slug, periodo, cr) in enumerate(ALUNOS_SPEC):
+    email = f'{email_local}@aluno.ibmec.edu.br'
+    u = criar_usuario(email, PASSWORD, 'aluno', nome)
     a = Aluno.objects.create(
         usuario=u,
-        cpf=fake_cpf(idx), rg=fake_rg(idx),
-        coeficiente_rendimento=Decimal(str(round(random.uniform(5.0, 9.5), 2))),
-        curso=cursos[curso_idx],
-        periodo_atual=random.randint(3, 10),
+        cpf=fake_cpf(idx),
+        rg=fake_rg(idx),
+        coeficiente_rendimento=Decimal(str(cr)),
+        curso=cursos_by_slug[slug],
+        periodo_atual=periodo,
         matriculado_estagio=True,
     )
-    alunos.append(a)
+    # Matrícula → username herda do email; mantemos username = email
+    alunos_by_email[email] = a
 
-print('🏢 Criando empresas…')
+print('🏢 Criando 8 empresas…')
 empresas = []
 for d in EMPRESAS:
     e = EmpresaConcedente.objects.create(aprovada_ibmec=True, **d)
     empresas.append(e)
 
-print('🧑‍💼 Criando supervisores de empresa…')
+print('🧑‍💼 Criando 8 supervisores de empresa…')
 supervisores = []
-for emp_idx, username, nome, cargo in SUPERVISORES:
-    u = Usuario.objects.create_user(
-        username=username, password=PASSWORD, tipo='supervisor_empresa',
-        nome=nome, email_institucional=f'{username}@empresa.com.br',
-    )
+for nome, email, emp_idx, cargo in SUPERVISORES:
+    u = criar_usuario(email, PASSWORD, 'supervisor_empresa', nome)
     s = SupervisorEmpresa.objects.create(usuario=u, empresa=empresas[emp_idx], cargo=cargo)
     supervisores.append(s)
 
-print('📝 Criando modelos de formulário (um por curso)…')
-modelos = []
-for ci, curso in enumerate(cursos):
-    nome, slug = CURSOS[ci]
+print('📝 Criando 14 modelos de formulário (1 por curso)…')
+modelos_by_slug = {}
+for nome, slug in CURSOS:
+    c = cursos_by_slug[slug]
     m = ModeloFormulario.objects.create(
-        curso=curso,
-        criado_por=coordenadores[ci],
+        curso=c,
+        criado_por=c.coordenador,
         titulo=f'Avaliação de Estágio — {nome}',
         secoes=gerar_modelo_secoes(slug),
         ativo=True,
     )
-    modelos.append(m)
+    modelos_by_slug[slug] = m
 
-print('📋 Criando processos de estágio…')
-# (aluno_idx, empresa_idx, status, qualidade_avaliacao_ou_None)
+print('📋 Criando 15 processos de estágio com status variados…')
+# (email_aluno, empresa_idx, status, qualidade ou None)
 PROCESSOS_SPEC = [
-    # 3 ativos (com avaliação)
-    (4,  0, 'ATIVO',     'alta'),   # Pedro Reis (CDIA)    → Tech Solutions
-    (12, 0, 'ATIVO',     'alta'),   # Thiago Pacheco (ENGC) → Tech Solutions
-    (16, 0, 'ATIVO',     'media'),  # Felipe Brito (ENGS)  → Tech Solutions
-    # 2 pendentes
-    (5,  2, 'PENDENTE',  None),     # Isabella Nunes (CDIA) → Banco Capital
-    (8,  3, 'PENDENTE',  None),     # Mateus Domingues (PUB) → Agência Criativa
-    # 2 aprovados
-    (0,  0, 'APROVADO',  None),     # Gabriel Silva (ADM)  → Tech Solutions
-    (2,  1, 'APROVADO',  None),     # Fernanda Castro (ARQ) → Construtora
-    # 1 encerrado (com avaliação)
-    (10, 4, 'ENCERRADO', 'alta'),   # Vinícius Ramos (DIR) → Machado & Associados
-    # 1 cancelado
-    (14, 1, 'CANCELADO', None),     # André Macedo (ENGP)  → Construtora
-    # 1 rejeitado
-    (6,  2, 'REJEITADO', None),     # Bruno Cavalcanti (ECO) → Banco Capital
+    # 4 ATIVO (com respostas)
+    ('pedro.reis@aluno.ibmec.edu.br',         7, 'ATIVO',     'alta'),   # CDIA → DataMind
+    ('isabella.nunes@aluno.ibmec.edu.br',     0, 'ATIVO',     'alta'),   # CDIA → Tech
+    ('diego.barros@aluno.ibmec.edu.br',       0, 'ATIVO',     'media'),  # ENGS → Tech
+    ('fernanda.castro@aluno.ibmec.edu.br',    1, 'ATIVO',     'alta'),   # ARQ → Construtora
+    # 3 PENDENTE
+    ('thiago.martins@aluno.ibmec.edu.br',     0, 'PENDENTE',  None),     # ENGCC → Tech
+    ('mateus.domingues@aluno.ibmec.edu.br',   3, 'PENDENTE',  None),     # PUB → Agência
+    ('amanda.lopes@aluno.ibmec.edu.br',       4, 'PENDENTE',  None),     # DIR → Machado
+    # 3 APROVADO
+    ('pedro.alves@aluno.ibmec.edu.br',        0, 'APROVADO',  None),     # ADM → Tech
+    ('lucas.maia@aluno.ibmec.edu.br',         1, 'APROVADO',  None),     # ENGCV → Construtora
+    ('felipe.gomes@aluno.ibmec.edu.br',       6, 'APROVADO',  None),     # ENGP → Metalúrgica
+    # 2 ENCERRADO (com respostas)
+    ('rodrigo.nascimento@aluno.ibmec.edu.br', 4, 'ENCERRADO', 'alta'),   # DIR → Machado
+    ('larissa.moura@aluno.ibmec.edu.br',      2, 'ENCERRADO', 'alta'),   # ECO → Banco
+    # 2 CANCELADO
+    ('eduardo.campos@aluno.ibmec.edu.br',     6, 'CANCELADO', None),     # ENGMC → Metalúrgica
+    ('andre.fonseca@aluno.ibmec.edu.br',      5, 'CANCELADO', None),     # RI → Global Trade
+    # 1 REJEITADO
+    ('bruno.cavalcanti@aluno.ibmec.edu.br',   2, 'REJEITADO', None),     # ECO → Banco
 ]
 
-processos = []
-for aluno_idx, emp_idx, status, qualidade in PROCESSOS_SPEC:
-    aluno = alunos[aluno_idx]
+slug_by_aluno_email = {f'{e[1]}@aluno.ibmec.edu.br': e[2] for e in ALUNOS_SPEC}
+
+for email_aluno, emp_idx, status, qualidade in PROCESSOS_SPEC:
+    aluno = alunos_by_email[email_aluno]
+    slug = slug_by_aluno_email[email_aluno]
     empresa = empresas[emp_idx]
     supervisor = supervisores[emp_idx]
-    curso_idx = ALUNOS[aluno_idx][0]
-    coord = cursos[curso_idx].coordenador
-    modelo = modelos[curso_idx]
-    slug = CURSOS[curso_idx][1]
+    coord = cursos_by_slug[slug].coordenador
+    modelo = modelos_by_slug[slug]
 
-    meses_offset = random.choice([-12, -8, -6, -3, 0, 3])
+    meses_offset = random.choice([-14, -10, -6, -3, 0, 3])
     inicio = date(2025, 1, 15) + timedelta(days=meses_offset * 30 + random.randint(0, 60))
     fim = inicio + timedelta(days=180)
     horas = random.choice([20, 30])
@@ -670,19 +530,15 @@ for aluno_idx, emp_idx, status, qualidade in PROCESSOS_SPEC:
 
     respostas = gerar_respostas(slug, qualidade) if qualidade else None
 
-    p = ProcessoEstagio.objects.create(
-        aluno=aluno,
-        empresa=empresa,
-        supervisor=supervisor,
-        coordenador=coord,
+    ProcessoEstagio.objects.create(
+        aluno=aluno, empresa=empresa, supervisor=supervisor, coordenador=coord,
         status=status,
         horas_semanais=horas,
         data_inicio_prevista=inicio,
         data_fim_prevista=fim,
         plano_atividades=(
-            f'Atuação em projetos da área de {empresa.areas_atuacao.split(chr(0x00B7))[0].strip()} '
-            f'sob supervisão da equipe. Atividades incluem análise, execução e relatórios periódicos '
-            f'alinhados ao plano pedagógico do curso de {CURSOS[curso_idx][0]}.'
+            f'Atuação em projetos de {empresa.areas_atuacao.split(chr(0x00B7))[0].strip()} '
+            f'sob supervisão da equipe.'
         ),
         valor_bolsa=valor_bolsa,
         valor_auxilio_transporte=valor_aux,
@@ -690,12 +546,8 @@ for aluno_idx, emp_idx, status, qualidade in PROCESSOS_SPEC:
         respostas_formulario=respostas,
         data_inicio_real=inicio if status in ('ATIVO', 'ENCERRADO') else None,
         data_fim_real=fim if status == 'ENCERRADO' else None,
-        justificativa_rejeicao=(
-            'Documentação incompleta — falta TCE assinado pelo responsável legal.'
-            if status == 'REJEITADO' else ''
-        ),
+        justificativa_rejeicao=('Documentação incompleta — falta TCE assinado.' if status == 'REJEITADO' else ''),
     )
-    processos.append(p)
 
 print()
 print('✅ Banco populado com sucesso!')
@@ -711,7 +563,31 @@ for p in ProcessoEstagio.objects.all():
     por_status[p.status] = por_status.get(p.status, 0) + 1
 print(f'  Por status:          {por_status}')
 print()
-print('🔑 Credenciais:')
-print('  admin / admin                          (superuser)')
-print(f'  <username> / {PASSWORD}                (demais usuários)')
-print('  Ex: pedro.reis, fernanda.castro, joao.oliveira, marcos.santiago, …')
+print('═' * 72)
+print('LOGINS DE TESTE (email + senha)')
+print('═' * 72)
+print()
+print('ADMIN:')
+print('  admin@ibmec.edu.br                          | admin')
+print()
+print('COORDENADORES:')
+for nome, email, slugs in COORDENADORES:
+    cursos_str = ', '.join(slug.upper() for slug in slugs)
+    print(f'  {email:<43} | {PASSWORD} | {cursos_str}')
+print()
+print('VISÃO GLOBAL:')
+for nome, email, tipo in VISAO_GLOBAL_USERS:
+    print(f'  {email:<43} | {PASSWORD} | {tipo}')
+print()
+print('ALUNOS (amostra de 6 — todos com senha ' + PASSWORD + '):')
+amostra = ['pedro.reis', 'isabella.nunes', 'fernanda.castro', 'rodrigo.nascimento', 'diego.barros', 'sophia.marques']
+for local in amostra:
+    spec = next(s for s in ALUNOS_SPEC if s[1] == local)
+    nome, _, slug, periodo, cr = spec
+    nome_curso = dict(CURSOS).get(next(n for n, sl in CURSOS if sl == slug)) if False else next(n for n, sl in CURSOS if sl == slug)
+    print(f'  {local}@aluno.ibmec.edu.br'.ljust(45) + f' | {PASSWORD} | {nome_curso}')
+print()
+print('SUPERVISORES (todos com senha ' + PASSWORD + '):')
+for nome, email, emp_idx, cargo in SUPERVISORES:
+    print(f'  {email:<43} | {PASSWORD} | {empresas[emp_idx].razao_social[:30]}')
+print('═' * 72)

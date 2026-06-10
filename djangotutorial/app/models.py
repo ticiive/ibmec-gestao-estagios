@@ -23,7 +23,23 @@ class Usuario(AbstractUser):
         default='aluno',
     )
     nome = models.CharField(max_length=100)
-    email_institucional = models.EmailField(blank=True, default='')
+    email_institucional = models.EmailField(unique=True)
+
+    # Autenticação por email; username permanece no schema (exigência do
+    # AbstractUser) mas é preenchido automaticamente a partir do email.
+    USERNAME_FIELD = 'email_institucional'
+    REQUIRED_FIELDS = ['username']
+
+    def save(self, *args, **kwargs):
+        # Sincroniza username ↔ email_institucional. Email é a identidade
+        # primária (USERNAME_FIELD), mas username continua no schema (AbstractUser).
+        if self.email_institucional and self.username != self.email_institucional:
+            self.username = self.email_institucional
+        elif not self.email_institucional and self.username:
+            # Compat: chamadores que só passam username (ex: testes legados)
+            # têm o email derivado automaticamente.
+            self.email_institucional = self.username
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nome
@@ -54,7 +70,7 @@ class Curso(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='cursos_coordenados',
+        related_name='cursos',
         verbose_name='Coordenador responsável',
     )
     carga_horaria_minima_total = models.PositiveIntegerField(
