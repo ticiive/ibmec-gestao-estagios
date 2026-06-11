@@ -184,6 +184,9 @@
         return apiRequest('/documentos/', { method: 'POST', body: fd });
       },
       validarDocumento: (id, status, com) => apiRequest(`/documentos/${id}/validar/`, { method: 'POST', body: { status, comentario: com || '' } }),
+      avaliarEmpresa: (empresaId, nota, comentario) => apiRequest('/avaliar-empresa/', { method: 'POST', body: { empresa: empresaId, nota, comentario } }),
+      esqueciSenha: (email) => apiRequest('/auth/esqueci-senha/', { method: 'POST', body: { email } }),
+      redefinirSenha: (uid, token, nova) => apiRequest('/auth/redefinir-senha/', { method: 'POST', body: { uid, token, nova_senha: nova } }),
       gerarTCE: (id) => apiDownload(`/processos-estagio/${id}/gerar-tce/`),
       gerarTermo: (id) => apiDownload(`/processos-estagio/${id}/gerar-termo-realizacao/`),
       gerarRelatorio: (id, d) => apiDownload(`/processos-estagio/${id}/gerar-relatorio/`, { method: 'POST', body: d }),
@@ -533,10 +536,11 @@
     // ═══════════════════════════════════════════════════════
     //  LOGIN / REGISTER
     // ═══════════════════════════════════════════════════════
-    function LoginPage({ onGoRegister }) {
+    function LoginPage() {
       const { login } = useAuth();
       const toast = useToast();
       const [u, setU] = useState(''); const [p, setP] = useState(''); const [load, setLoad] = useState(false);
+      const [esqueciOpen, setEsqueciOpen] = useState(false);
       async function submit(e) {
         e.preventDefault(); setLoad(true);
         try { await login(u, p); toast.success('Bem-vindo!'); }
@@ -560,10 +564,163 @@
               </button>
             </form>
             <div className="text-center mt-6 text-sm">
-              <button className="hover:underline" style={{ color: 'var(--accent)' }} onClick={onGoRegister}>Não tem conta? Registre-se</button>
+              <button className="hover:underline" style={{ color: 'var(--accent)' }} onClick={() => setEsqueciOpen(true)}>Esqueci minha senha</button>
             </div>
           </div>
+          {esqueciOpen && <EsqueciSenhaModal onClose={() => setEsqueciOpen(false)} />}
         </div>
+      );
+    }
+
+    // Modal "Esqueci minha senha" — chama POST /api/auth/esqueci-senha/
+    function EsqueciSenhaModal({ onClose }) {
+      const toast = useToast();
+      const [email, setEmail] = useState('');
+      const [load, setLoad] = useState(false);
+      async function submit(e) {
+        e.preventDefault(); setLoad(true);
+        try {
+          await Api.esqueciSenha(email);
+          toast.success('Se o email estiver cadastrado, você receberá instruções.');
+          onClose();
+        } catch (err) { toast.error(err.message); }
+        finally { setLoad(false); }
+      }
+      return (
+        <Modal open title="Esqueci minha senha" onClose={onClose} size="sm">
+          <form onSubmit={submit} className="space-y-3">
+            <div className="text-sm" style={{ color: 'var(--muted)' }}>
+              Informe seu email institucional. Enviaremos um link para você redefinir a senha.
+            </div>
+            <input className="input" type="email" required autoFocus
+              value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="seu.email@ibmec.edu.br" />
+            <div className="flex justify-end gap-2 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={load}>
+                {load ? <Spinner size={14} /> : 'Enviar link'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      );
+    }
+
+    // Página acessada por deep link /redefinir-senha/?uid=...&token=...
+    function RedefinirSenhaPage({ uid, token }) {
+      const toast = useToast();
+      const [nova, setNova] = useState('');
+      const [conf, setConf] = useState('');
+      const [load, setLoad] = useState(false);
+      const [sucesso, setSucesso] = useState(false);
+      async function submit(e) {
+        e.preventDefault();
+        if (nova !== conf) { toast.error('As senhas não coincidem.'); return; }
+        if (nova.length < 6) { toast.error('Use ao menos 6 caracteres.'); return; }
+        setLoad(true);
+        try {
+          await Api.redefinirSenha(uid, token, nova);
+          setSucesso(true);
+        } catch (err) {
+          toast.error(err.data?.erro || err.message);
+        } finally { setLoad(false); }
+      }
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="surface p-8 w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center gap-2 mb-2" style={{ color: 'var(--accent)' }}>{Icon.capelo}<span className="text-2xl font-bold">EstágioIBMEC</span></div>
+              <p style={{ color: 'var(--muted)' }} className="text-sm">Redefinir senha</p>
+            </div>
+            {sucesso ? (
+              <div className="space-y-3">
+                <div className="surface2 p-4 text-center">✓ Senha redefinida com sucesso.</div>
+                <a href="/dashboard-ibmec.html" className="btn btn-primary w-full">Ir para o login</a>
+              </div>
+            ) : (
+              <form onSubmit={submit} className="space-y-3">
+                <div>
+                  <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>Nova senha</label>
+                  <input className="input" type="password" required minLength="6"
+                    value={nova} onChange={e => setNova(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>Confirmar senha</label>
+                  <input className="input" type="password" required minLength="6"
+                    value={conf} onChange={e => setConf(e.target.value)} />
+                </div>
+                <button type="submit" className="btn btn-primary w-full mt-4" disabled={load}>
+                  {load ? <Spinner size={14} /> : 'Redefinir'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Modal de avaliação anônima da empresa (estrelas + comentário opcional)
+    function AvaliarEmpresaModal({ empresas, onClose, onDone }) {
+      const toast = useToast();
+      const [empresaId, setEmpresaId] = useState(empresas[0]?.id || '');
+      const [nota, setNota] = useState(0);
+      const [hover, setHover] = useState(0);
+      const [comentario, setComentario] = useState('');
+      const [enviando, setEnviando] = useState(false);
+      async function submit() {
+        if (!empresaId) { toast.error('Selecione a empresa.'); return; }
+        if (!nota) { toast.error('Escolha uma nota (1 a 5 estrelas).'); return; }
+        setEnviando(true);
+        try {
+          await Api.avaliarEmpresa(empresaId, nota, comentario.trim());
+          toast.success('Avaliação enviada anonimamente.');
+          onDone();
+        } catch (e) { toast.error(e.message); }
+        finally { setEnviando(false); }
+      }
+      return (
+        <Modal open title="Avaliar empresa (anônimo)" onClose={onClose} size="md">
+          <div className="space-y-4">
+            <div className="surface2 p-3 text-xs" style={{ color: 'var(--text)' }}>
+              🔒 <b>Sua avaliação é anônima.</b> Nem o coordenador, nem a empresa, nem o sistema sabem quem avaliou. Não armazenamos vínculo com seu perfil.
+            </div>
+            <div>
+              <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>Empresa</label>
+              <select className="input" value={empresaId} onChange={e => setEmpresaId(e.target.value)}>
+                <option value="">— Selecione —</option>
+                {empresas.map(e => <option key={e.id} value={e.id}>{e.razao_social}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>Sua nota</label>
+              <div className="flex items-center gap-1 text-3xl">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} type="button"
+                    style={{ color: (hover || nota) >= n ? 'var(--accent4)' : 'var(--border)', cursor: 'pointer', lineHeight: 1 }}
+                    onMouseEnter={() => setHover(n)} onMouseLeave={() => setHover(0)}
+                    onClick={() => setNota(n)}>
+                    ★
+                  </button>
+                ))}
+                <span className="ml-3 text-sm" style={{ color: 'var(--muted)' }}>
+                  {nota ? `${nota} ${nota === 1 ? 'estrela' : 'estrelas'}` : 'Clique para avaliar'}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>Comentário (opcional)</label>
+              <textarea className="input" rows="4" value={comentario}
+                onChange={e => setComentario(e.target.value)}
+                placeholder="Compartilhe sua experiência (sem citar nomes para preservar o anonimato)." />
+            </div>
+            <div className="flex justify-end gap-2 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+              <button className="btn btn-secondary" onClick={onClose} disabled={enviando}>Cancelar</button>
+              <button className="btn btn-primary" onClick={submit} disabled={enviando || !nota || !empresaId}>
+                {enviando ? <Spinner size={14} /> : 'Enviar avaliação'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       );
     }
 
@@ -702,9 +859,12 @@
       { id: 'relatorios', label: 'Relatórios', icon: 'relatorios' },
       { id: 'empresas',   label: 'Empresas',   icon: 'empresas'   },
     ];
+    // Supervisor (perfil empresa) tem visão restrita: lista de alunos da
+    // própria empresa + documentos. Sem dashboard agregado, sem respostas de
+    // avaliação. O item "Alunos" abre a página de detalhe do aluno selecionado.
     const MENU_SUPERVISOR = [
-      { id: 'dashboard',  label: 'Dashboard',  icon: 'dashboard' },
-      { id: 'documentos', label: 'Documentos', icon: 'docs'      },
+      { id: 'dashboard',  label: 'Alunos',     icon: 'home' },
+      { id: 'documentos', label: 'Documentos', icon: 'docs' },
     ];
 
     function CoordSidebar({ active, onNav, alunos, selectedId, onSelectAluno, onConfigForm, menuItems }) {
@@ -857,6 +1017,9 @@
     //  COORD — ALUNO DETAIL DASHBOARD
     // ═══════════════════════════════════════════════════════
     function AlunoDetailDashboard({ resumo, processo, modelo }) {
+      const { user } = useAuth();
+      // Supervisor não vê respostas do formulário nem score de avaliação.
+      const ehSupervisor = user?.tipo === 'supervisor_empresa';
       if (!resumo) return (
         <div className="surface p-12 text-center"><div style={{ fontSize: 48, marginBottom: 12 }}>👈</div>
           <h3 className="text-lg font-semibold">Selecione um aluno na barra lateral</h3>
@@ -870,7 +1033,7 @@
         </div>
       );
       const horasTotais = processo ? calcHorasTotais(processo) : null;
-      const score = processo && modelo ? calcScoreProcesso(processo, modelo) : null;
+      const score = !ehSupervisor && processo && modelo ? calcScoreProcesso(processo, modelo) : null;
       const semestre = processo ? calcSemestre(processo.data_inicio_prevista) : null;
       return (
         <div className="space-y-5">
@@ -897,29 +1060,43 @@
             </div>
           </div>
 
-          {/* KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {/* KPIs — esconde Score para supervisor */}
+          <div className={`grid grid-cols-2 md:grid-cols-3 ${ehSupervisor ? 'lg:grid-cols-4' : 'lg:grid-cols-5'} gap-3`}>
             <KpiCard icon="⏱️" label="Horas" value={horasTotais != null ? `${horasTotais}h` : '—'} sub={resumo.horas_semanais ? `${resumo.horas_semanais}h/sem` : null} />
             <KpiCard icon="💰" label="Remuneração" value={resumo.remuneracao != null ? `R$${resumo.remuneracao.toFixed(0)}` : '—'} sub="Mensal" />
             <KpiCard icon="📅" label="Início" value={processo?.data_inicio_prevista ? new Date(processo.data_inicio_prevista).toLocaleDateString('pt-BR') : '—'} sub={semestre} />
             <KpiCard icon="🏢" label="Empresa" value={(resumo.empresa_nome || '—').slice(0, 14)} sub={resumo.empresa_nome && resumo.empresa_nome.length > 14 ? resumo.empresa_nome.slice(14, 30) : null} />
-            <KpiCard icon="⭐" label="Score" value={score != null ? score.toFixed(2) : '—'} sub="Avaliação exp." color="var(--accent2)" />
+            {!ehSupervisor && <KpiCard icon="⭐" label="Score" value={score != null ? score.toFixed(2) : '—'} sub="Avaliação exp." color="var(--accent2)" />}
           </div>
+
+          {/* Dados do processo (sempre) */}
+          {processo && (
+            <div className="surface p-5">
+              <div className="font-semibold mb-3">Dados do processo</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <DataRow label="Plano de atividades" value={processo.plano_atividades} />
+                <DataRow label="Fim previsto" value={processo.data_fim_prevista} />
+                <DataRow label="Aux. transporte" value={processo.valor_auxilio_transporte != null ? `R$${parseFloat(processo.valor_auxilio_transporte).toFixed(2)}` : '—'} />
+              </div>
+            </div>
+          )}
 
           {/* DOCUMENTOS */}
           {processo && <DocumentosDoProcesso processoId={processo.id} />}
 
-          {/* RESPOSTAS */}
-          {!processo?.respostas_formulario ? (
-            <div className="surface p-10 text-center">
-              <div style={{ fontSize: 40, marginBottom: 12 }}>📝</div>
-              <h3 className="text-lg font-semibold">Avaliação não preenchida</h3>
-              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Este aluno ainda não preencheu a avaliação de estágio.</p>
-            </div>
-          ) : !modelo ? (
-            <div className="surface p-6 text-sm" style={{ color: 'var(--muted)' }}>Não foi possível carregar o modelo do formulário.</div>
-          ) : (
-            <RenderRespostas processo={processo} modelo={modelo} />
+          {/* RESPOSTAS — escondido para supervisor */}
+          {!ehSupervisor && (
+            !processo?.respostas_formulario ? (
+              <div className="surface p-10 text-center">
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📝</div>
+                <h3 className="text-lg font-semibold">Avaliação não preenchida</h3>
+                <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Este aluno ainda não preencheu a avaliação de estágio.</p>
+              </div>
+            ) : !modelo ? (
+              <div className="surface p-6 text-sm" style={{ color: 'var(--muted)' }}>Não foi possível carregar o modelo do formulário.</div>
+            ) : (
+              <RenderRespostas processo={processo} modelo={modelo} />
+            )
           )}
         </div>
       );
@@ -1921,11 +2098,15 @@
       }, []);
       useEffect(() => { load(); }, [load]);
       if (loading) return <LoadingBlock />;
+      // Só permite iniciar novo processo se TODOS os anteriores estão CANCELADO.
+      const podeIniciar = !processos?.length || (processos || []).every(p => p.status === 'CANCELADO');
       return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold">Meus Processos</h1>
-            <button className="btn btn-primary" onClick={() => setWizardOpen(true)}>+ Iniciar Novo Processo</button>
+            {podeIniciar
+              ? <button className="btn btn-primary" onClick={() => setWizardOpen(true)}>+ Iniciar Novo Processo</button>
+              : <div className="text-xs" style={{ color: 'var(--muted)' }}>Você já tem um processo em andamento.</div>}
           </div>
           {wizardOpen && <IniciarProcessoWizard onClose={() => setWizardOpen(false)} onCriado={() => { setWizardOpen(false); load(); }} />}
           <div className="space-y-3">
@@ -1954,6 +2135,8 @@
       const [loading, setLoading] = useState(true);
       const [relatorioModal, setRelatorioModal] = useState(null); // 'parcial' | 'final' | null
       const [uploadOpen, setUploadOpen] = useState(false);
+      const [avaliarOpen, setAvaliarOpen] = useState(false);
+      const [empresas, setEmpresas] = useState([]);
       const load = useCallback(async () => {
         setLoading(true);
         try {
@@ -1963,6 +2146,7 @@
         } finally { setLoading(false); }
       }, []);
       useEffect(() => { load(); }, [load]);
+      useEffect(() => { Api.empresas().then(setEmpresas).catch(() => setEmpresas([])); }, []);
       async function gerar(tipo) {
         try {
           let url;
@@ -1982,6 +2166,17 @@
       return (
         <div className="space-y-5">
           <h1 className="text-2xl font-bold">Documentos</h1>
+
+          {/* Card de avaliação anônima da empresa */}
+          <div className="surface p-4 flex items-center justify-between gap-3 flex-wrap" style={{ borderLeft: '4px solid var(--accent4)' }}>
+            <div>
+              <div className="font-semibold">⭐ Avaliar a empresa do meu estágio</div>
+              <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                Sua avaliação é totalmente anônima. Ajuda os próximos estagiários a escolherem com mais segurança.
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={() => setAvaliarOpen(true)}>Avaliar empresa</button>
+          </div>
 
           {!podeAgir && (
             <div className="surface p-4" style={{ borderLeft: `4px solid var(--accent3)`, background: 'rgba(255,107,107,.08)' }}>
@@ -2027,6 +2222,13 @@
               processo={processo}
               onClose={() => setUploadOpen(false)}
               onDone={() => { setUploadOpen(false); load(); }}
+            />
+          )}
+          {avaliarOpen && (
+            <AvaliarEmpresaModal
+              empresas={empresas}
+              onClose={() => setAvaliarOpen(false)}
+              onDone={() => setAvaliarOpen(false)}
             />
           )}
         </div>
@@ -2468,29 +2670,61 @@
 
     function NovaEmpresaModal({ initial, onClose, onSaved }) {
       const toast = useToast();
-      const [form, setForm] = useState({ cnpj: initial?.cnpj || '', razao_social: initial?.razao_social || '', areas_atuacao: '', localizacao: '', email_contato: '' });
+      const [form, setForm] = useState({
+        cnpj: initial?.cnpj || '',
+        razao_social: initial?.razao_social || '',
+        areas_atuacao: '',
+        localizacao: '',
+        email_contato: '',
+        descricao: '',
+        responsavel_legal_nome: '',
+        responsavel_legal_cargo: '',
+      });
       const [salv, setSalv] = useState(false);
       const upd = (k, v) => setForm(s => ({ ...s, [k]: v }));
+      // Todos os campos são obrigatórios. Backend confirma; frontend pré-valida.
+      const CAMPOS = [
+        ['cnpj', 'CNPJ', 'text'],
+        ['razao_social', 'Razão social', 'text'],
+        ['areas_atuacao', 'Áreas de atuação', 'text'],
+        ['localizacao', 'Localização', 'text'],
+        ['email_contato', 'Email do gestor', 'email'],
+        ['descricao', 'Descrição da empresa', 'textarea'],
+        ['responsavel_legal_nome', 'Responsável legal', 'text'],
+        ['responsavel_legal_cargo', 'Cargo do responsável', 'text'],
+      ];
+      const tudoPreenchido = CAMPOS.every(([k]) => (form[k] || '').trim().length > 0);
       async function submit() {
+        if (!tudoPreenchido) { toast.error('Preencha todos os campos obrigatórios.'); return; }
         setSalv(true);
         try { onSaved(await Api.criarEmpresa(form)); }
         catch (e) {
-          if (e.status === 403) toast.error('Apenas administradores podem cadastrar empresas.');
-          else toast.error(e.message);
+          const d = e.data || {};
+          const ms = Object.entries(d).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' ') : v}`);
+          toast.error(ms.join(' | ') || e.message);
         } finally { setSalv(false); }
       }
       return (
         <Modal open title="Cadastrar nova empresa" onClose={onClose} size="md">
           <div className="space-y-3">
-            {['cnpj', 'razao_social', 'areas_atuacao', 'localizacao', 'email_contato'].map(k => (
+            <div className="surface2 p-3 text-xs" style={{ color: 'var(--text)' }}>
+              ⓘ Todos os campos são obrigatórios. Após o cadastro, a empresa receberá um email para criar acesso ao sistema.
+            </div>
+            {CAMPOS.map(([k, label, tipo]) => (
               <div key={k}>
-                <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>{k.replace('_', ' ')}</label>
-                <input className="input" value={form[k]} onChange={e => upd(k, e.target.value)} type={k === 'email_contato' ? 'email' : 'text'} />
+                <label className="block text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>
+                  {label} <span style={{ color: 'var(--accent3)' }}>*</span>
+                </label>
+                {tipo === 'textarea' ? (
+                  <textarea className="input" rows="3" value={form[k]} onChange={e => upd(k, e.target.value)} required />
+                ) : (
+                  <input className="input" value={form[k]} onChange={e => upd(k, e.target.value)} type={tipo} required />
+                )}
               </div>
             ))}
             <div className="flex justify-end gap-2 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
               <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-              <button className="btn btn-primary" disabled={salv} onClick={submit}>{salv ? <Spinner size={14} /> : 'Salvar'}</button>
+              <button className="btn btn-primary" disabled={salv || !tudoPreenchido} onClick={submit}>{salv ? <Spinner size={14} /> : 'Salvar'}</button>
             </div>
           </div>
         </Modal>
@@ -2993,8 +3227,11 @@
     // ═══════════════════════════════════════════════════════
     function App() {
       const { user } = useAuth();
-      const [auth, setAuth] = useState('login');
-      if (!user) return auth === 'login' ? <LoginPage onGoRegister={() => setAuth('register')} /> : <RegisterPage onGoLogin={() => setAuth('login')} />;
+      // Suporta deep link de redefinição: ?uid=...&token=...
+      const params = new URLSearchParams(window.location.search);
+      const resetUid = params.get('uid'), resetToken = params.get('token');
+      if (resetUid && resetToken) return <RedefinirSenhaPage uid={resetUid} token={resetToken} />;
+      if (!user) return <LoginPage />;
       if (user.tipo === 'coordenador' || isVisaoGlobal(user)) return <CoordApp />;
       if (user.tipo === 'aluno') return <AlunoApp />;
       if (user.tipo === 'supervisor_empresa') return <SupervisorApp />;

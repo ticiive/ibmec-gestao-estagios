@@ -15,7 +15,7 @@ class Usuario(AbstractUser):
         ('carreiras', 'Carreiras'),
     ]
 
-    TIPOS_ADMINISTRATIVOS = frozenset({'reitor', 'pro_reitor', 'secretaria', 'carreiras'})
+    TIPOS_ADMINISTRATIVOS = frozenset({'reitor', 'pro_reitor', 'secretaria', 'carreiras', 'casa'})
 
     tipo = models.CharField(
         max_length=20,
@@ -403,11 +403,16 @@ class AvaliacaoEmpresa(models.Model):
     empresa = models.ForeignKey(
         EmpresaConcedente, on_delete=models.CASCADE, related_name='avaliacoes',
     )
+    # aluno/processo agora opcionais para suportar avaliações ANÔNIMAS feitas
+    # pelos alunos. As avaliações vinculadas (com processo) continuam sujeitas
+    # à constraint de unicidade. As anônimas têm processo=None e aluno=None.
     aluno = models.ForeignKey(
-        Aluno, on_delete=models.CASCADE, related_name='avaliacoes_empresas',
+        Aluno, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='avaliacoes_empresas',
     )
     processo = models.OneToOneField(
-        ProcessoEstagio, on_delete=models.CASCADE, related_name='avaliacao_empresa',
+        ProcessoEstagio, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='avaliacao_empresa',
     )
     nota = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)],

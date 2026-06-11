@@ -272,6 +272,20 @@ class Command(BaseCommand):
             password='admin', tipo='coordenador', nome='Administrador IBMEC',
         )
 
+        # Quatro perfis administrativos com visão global (read-only).
+        VISAO_GLOBAL_USERS = [
+            ('Ana Paula Mendes',    'secretaria@ibmec.edu.br', 'secretaria'),
+            ('Carlos Eduardo Souza','carreiras@ibmec.edu.br',  'casa'),
+            ('Roberto Figueiredo',  'reitor@ibmec.edu.br',     'reitor'),
+            ('Claudia Amaral',      'proreitor@ibmec.edu.br',  'pro_reitor'),
+        ]
+        self.stdout.write(f'🏛  Visão global ({len(VISAO_GLOBAL_USERS)})…')
+        for nome, email, tipo in VISAO_GLOBAL_USERS:
+            Usuario.objects.create_user(
+                username=email, email_institucional=email,
+                password=PASSWORD, tipo=tipo, nome=nome,
+            )
+
         self.stdout.write(f'🎓 Cursos ({len(CURSOS)})…')
         cursos = {}
         for slug, nome in CURSOS:

@@ -9,6 +9,7 @@ from .views import (
     TemplateDocumentoViewSet,
     GerarPDFView, GerarRelatorioView, PreencherFormularioView,
     RegisterView, LoginView, LogoutView,
+    AvaliarEmpresaView, EsqueciSenhaView, RedefinirSenhaView,
 )
 from .views_dashboard import (
     DashboardProcessosView, DashboardEstatisticasView, DashboardEmpresasView,
@@ -28,9 +29,12 @@ router.register(r'templates-documentos', TemplateDocumentoViewSet, basename='tem
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('auth/register/', RegisterView.as_view(), name='auth-register'),
-    path('auth/login/',    LoginView.as_view(),    name='auth-login'),
-    path('auth/logout/',   LogoutView.as_view(),   name='auth-logout'),
+    path('auth/register/',         RegisterView.as_view(),       name='auth-register'),
+    path('auth/login/',            LoginView.as_view(),          name='auth-login'),
+    path('auth/logout/',           LogoutView.as_view(),         name='auth-logout'),
+    path('auth/esqueci-senha/',    EsqueciSenhaView.as_view(),   name='auth-esqueci-senha'),
+    path('auth/redefinir-senha/',  RedefinirSenhaView.as_view(), name='auth-redefinir-senha'),
+    path('avaliar-empresa/',       AvaliarEmpresaView.as_view(), name='avaliar-empresa'),
     path(
         'processos-estagio/<int:processo_id>/gerar-tce/',
         GerarPDFView.as_view(),

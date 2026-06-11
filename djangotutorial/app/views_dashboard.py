@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from .models import (
     ProcessoEstagio, EmpresaConcedente, DocumentoProcesso, ModeloFormulario,
+    AvaliacaoEmpresa,
 )
 from .permissions import get_coordenador, get_supervisor, is_admin, is_visao_global
 from .dashboard_utils import (
@@ -115,13 +116,19 @@ class DashboardProcessosView(APIView):
 
 
 class DashboardEstatisticasView(APIView):
-    """GET /api/dashboard/estatisticas/ — estatísticas agregadas dos processos."""
+    """GET /api/dashboard/estatisticas/ — estatísticas agregadas dos processos.
+
+    Bloqueado para supervisores: dados de avaliação são confidenciais e os
+    estagiários da empresa não devem ser apresentados de forma agregada
+    (RN: privacidade dos estagiários frente à empresa concedente).
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
         coord = get_coordenador(user)
-        if not is_admin(user) and not is_visao_global(user) and coord is None and get_supervisor(user) is None:
+        # Supervisor NÃO acessa estatísticas agregadas.
+        if not is_admin(user) and not is_visao_global(user) and coord is None:
             return Response(
                 {'erro': 'Acesso restrito a coordenadores e administradores.'},
                 status=drf_status.HTTP_403_FORBIDDEN,
@@ -214,13 +221,19 @@ class DashboardEstatisticasView(APIView):
 
 
 class DashboardEmpresasView(APIView):
-    """GET /api/dashboard/empresas/ — estatísticas por empresa concedente."""
+    """GET /api/dashboard/empresas/ — estatísticas por empresa concedente.
+
+    Bloqueado para supervisores: contêm dados agregados de outras empresas
+    e médias de avaliação anônimas que não devem ser expostas ao próprio
+    supervisor que está sendo avaliado.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
         coord = get_coordenador(user)
-        if not is_admin(user) and not is_visao_global(user) and coord is None and get_supervisor(user) is None:
+        # Supervisor NÃO acessa o dashboard de empresas.
+        if not is_admin(user) and not is_visao_global(user) and coord is None:
             return Response(
                 {'erro': 'Acesso restrito a coordenadores e administradores.'},
                 status=drf_status.HTTP_403_FORBIDDEN,
@@ -254,6 +267,15 @@ class DashboardEmpresasView(APIView):
                 }
                 for p in procs
             ]
+            # Avaliações anônimas dos alunos sobre a empresa (1-5 estrelas).
+            avaliacoes_qs = AvaliacaoEmpresa.objects.filter(empresa_id=emp_id)
+            notas = list(avaliacoes_qs.values_list('nota', flat=True))
+            avaliacao_estrelas = round(sum(notas) / len(notas), 2) if notas else None
+            comentarios = [
+                {'nota': a.nota, 'comentario': a.comentario, 'data': a.data_criacao.isoformat()}
+                for a in avaliacoes_qs.order_by('-data_criacao')[:10]
+                if a.comentario
+            ]
             resultado.append({
                 'empresa_id': emp_id,
                 'nome': dados['nome'],
@@ -262,6 +284,9 @@ class DashboardEmpresasView(APIView):
                 'media_remuneracao': round(sum(remuneracoes) / len(remuneracoes), 2) if remuneracoes else None,
                 'media_horas_semanais': round(sum(horas) / len(horas), 2) if horas else None,
                 'avaliacao_media': avaliacao_media,
+                'avaliacao_estrelas': avaliacao_estrelas,
+                'total_avaliacoes': len(notas),
+                'comentarios_anonimos': comentarios,
                 'estagiarios': estagiarios,
             })
 

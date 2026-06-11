@@ -244,11 +244,13 @@ class CriarProcessoSerializer(serializers.ModelSerializer):
                 'horas_semanais': 'Limite legal de 30h semanais (Lei 11.788/08).'
             })
 
-        # RN05: 1 processo vivo por aluno
-        if ProcessoEstagio.objects.filter(aluno=aluno, status__in=ESTADOS_VIVOS).exists():
+        # RN05 (estendida): só pode iniciar processo se TODOS os anteriores
+        # estiverem CANCELADO. Qualquer outro estado (vivo ou encerrado)
+        # bloqueia a abertura de um novo.
+        if ProcessoEstagio.objects.filter(aluno=aluno).exclude(status='CANCELADO').exists():
             raise serializers.ValidationError(
-                'RN05: aluno já possui um processo de estágio em andamento. '
-                'Cancele ou aguarde o encerramento antes de abrir outro.'
+                'Você já possui um processo de estágio em andamento. '
+                'Só é possível iniciar novo processo se o anterior estiver cancelado.'
             )
 
         return data

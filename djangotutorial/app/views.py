@@ -55,8 +55,18 @@ class CursoViewSet(viewsets.ModelViewSet):
 
 
 class EmpresaConcedenteViewSet(viewsets.ModelViewSet):
+    """
+    Coordenador/admin podem criar/editar. Aluno também pode criar (cadastra
+    a empresa do estágio). Após criação por aluno, dispara criação do
+    supervisor e email com link de definição de senha.
+    """
     serializer_class = EmpresaConcedenteSerializer
-    permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
+
+    def get_permissions(self):
+        if self.action == 'create':
+            # Qualquer usuário autenticado pode propor uma empresa
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsAdminOrReadOnly()]
 
     def get_queryset(self):
         qs = EmpresaConcedente.objects.all()
@@ -67,6 +77,70 @@ class EmpresaConcedenteViewSet(viewsets.ModelViewSet):
         if busca:
             qs = qs.filter(razao_social__icontains=busca)
         return qs
+
+    _CAMPOS_OBRIGATORIOS_EMPRESA = [
+        'cnpj', 'razao_social', 'areas_atuacao', 'localizacao',
+        'email_contato', 'descricao',
+        'responsavel_legal_nome', 'responsavel_legal_cargo',
+    ]
+
+    def create(self, request, *args, **kwargs):
+        # Aluno cadastrando empresa: exige TODOS os campos preenchidos.
+        if get_aluno(request.user) is not None:
+            faltando = [
+                c for c in self._CAMPOS_OBRIGATORIOS_EMPRESA
+                if not (request.data.get(c) or '').strip()
+            ]
+            if faltando:
+                return Response(
+                    {'erro': 'Todos os campos da empresa são obrigatórios.',
+                     'campos_faltando': faltando},
+                    status=drf_status.HTTP_400_BAD_REQUEST,
+                )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        empresa = serializer.save()
+        aluno_perfil = get_aluno(self.request.user)
+        if aluno_perfil is None:
+            return  # criação por coord/admin: não dispara fluxo de email
+        # Cria Usuario+SupervisorEmpresa para que o gestor da empresa acesse o sistema
+        from django.conf import settings as dj_settings
+        from django.contrib.auth.tokens import PasswordResetTokenGenerator
+        from django.core.mail import send_mail
+        import secrets
+        email_gestor = (empresa.email_contato or '').strip()
+        if not email_gestor:
+            return
+        if Usuario.objects.filter(email_institucional=email_gestor).exists():
+            return  # já existe; não recria
+        senha_aleatoria = secrets.token_urlsafe(16)
+        user_sup = Usuario.objects.create_user(
+            username=email_gestor,
+            email_institucional=email_gestor,
+            password=senha_aleatoria,
+            tipo='supervisor_empresa',
+            nome=empresa.responsavel_legal_nome or empresa.razao_social,
+        )
+        SupervisorEmpresa.objects.create(
+            usuario=user_sup, empresa=empresa,
+            cargo=empresa.responsavel_legal_cargo or '',
+        )
+        token = PasswordResetTokenGenerator().make_token(user_sup)
+        base = getattr(dj_settings, 'FRONTEND_BASE_URL', 'http://localhost:8000')
+        link = f'{base}/redefinir-senha/?uid={user_sup.pk}&token={token}'
+        nome_aluno = self.request.user.nome or self.request.user.email_institucional
+        send_mail(
+            'IBMEC Estágios — sua empresa foi cadastrada',
+            f'Olá!\n\nA empresa {empresa.razao_social} foi cadastrada no sistema '
+            f'de estágios do IBMEC pelo aluno {nome_aluno}.\n\n'
+            'Clique no link abaixo para definir sua senha e acessar o painel:\n'
+            f'{link}\n\n'
+            'Equipe IBMEC Estágios.\n',
+            dj_settings.DEFAULT_FROM_EMAIL,
+            [email_gestor],
+            fail_silently=True,
+        )
 
 
 class AlunoViewSet(viewsets.ModelViewSet):
@@ -321,6 +395,29 @@ class ProcessoEstagioViewSet(viewsets.ModelViewSet):
         if self.action == 'alterar_status':
             return AlterarStatusSerializer
         return ProcessoEstagioSerializer
+
+    def _filtrar_respostas_se_supervisor(self, data):
+        """Supervisor não pode ver respostas_formulario do aluno (privacidade
+        da avaliação). Anula o campo no payload para esse perfil."""
+        user = self.request.user
+        if get_supervisor(user) is not None and not has_global_access(user):
+            if isinstance(data, list):
+                for d in data:
+                    if isinstance(d, dict):
+                        d['respostas_formulario'] = None
+            elif isinstance(data, dict):
+                data['respostas_formulario'] = None
+        return data
+
+    def list(self, request, *args, **kwargs):
+        resp = super().list(request, *args, **kwargs)
+        resp.data = self._filtrar_respostas_se_supervisor(resp.data)
+        return resp
+
+    def retrieve(self, request, *args, **kwargs):
+        resp = super().retrieve(request, *args, **kwargs)
+        resp.data = self._filtrar_respostas_se_supervisor(resp.data)
+        return resp
 
     def get_queryset(self):
         user = self.request.user
@@ -975,3 +1072,117 @@ class LogoutView(APIView):
         except Exception:
             pass
         return Response({'mensagem': 'Logout realizado com sucesso.'})
+
+
+# ── Esqueci minha senha / Redefinir ───────────────────────────────────────
+
+class EsqueciSenhaView(APIView):
+    """POST /api/auth/esqueci-senha/ — envia link de redefinição por email."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from django.conf import settings as dj_settings
+        from django.contrib.auth.tokens import PasswordResetTokenGenerator
+        from django.core.mail import send_mail
+        email = (request.data.get('email') or '').strip()
+        # Resposta sempre 200 para não vazar se o email existe ou não.
+        if email:
+            user = Usuario.objects.filter(email_institucional=email).first()
+            if user is not None:
+                token = PasswordResetTokenGenerator().make_token(user)
+                base = getattr(dj_settings, 'FRONTEND_BASE_URL', 'http://localhost:8000')
+                link = f'{base}/redefinir-senha/?uid={user.pk}&token={token}'
+                send_mail(
+                    'IBMEC Estágios — redefinição de senha',
+                    f'Olá {user.nome},\n\nClique no link abaixo para redefinir '
+                    f'sua senha no sistema de estágios IBMEC:\n\n{link}\n\n'
+                    'Se você não solicitou esta redefinição, ignore este email.\n',
+                    dj_settings.DEFAULT_FROM_EMAIL,
+                    [email],
+                    fail_silently=True,
+                )
+        return Response({'mensagem': 'Se o email estiver cadastrado, você receberá instruções.'})
+
+
+class RedefinirSenhaView(APIView):
+    """POST /api/auth/redefinir-senha/ — valida token e troca senha."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from django.contrib.auth.tokens import PasswordResetTokenGenerator
+        uid = request.data.get('uid')
+        token = request.data.get('token')
+        nova = request.data.get('nova_senha') or ''
+        if not uid or not token or not nova:
+            return Response(
+                {'erro': 'uid, token e nova_senha são obrigatórios.'},
+                status=drf_status.HTTP_400_BAD_REQUEST,
+            )
+        if len(nova) < 6:
+            return Response(
+                {'erro': 'Nova senha deve ter ao menos 6 caracteres.'},
+                status=drf_status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            user = Usuario.objects.get(pk=uid)
+        except Usuario.DoesNotExist:
+            return Response({'erro': 'Token inválido.'}, status=drf_status.HTTP_400_BAD_REQUEST)
+        if not PasswordResetTokenGenerator().check_token(user, token):
+            return Response({'erro': 'Token inválido ou expirado.'}, status=drf_status.HTTP_400_BAD_REQUEST)
+        user.set_password(nova)
+        user.save(update_fields=['password'])
+        return Response({'mensagem': 'Senha redefinida com sucesso.'})
+
+
+# ── Avaliação anônima de empresa pelo aluno ─────────────────────────────────
+
+class AvaliarEmpresaView(APIView):
+    """
+    POST /api/avaliar-empresa/
+    Body: { "empresa": int, "nota": 1-5, "comentario": str opcional }
+
+    A avaliação é ANÔNIMA — não vinculamos ao aluno nem ao processo no
+    banco. Só verificamos que o requester é um aluno autenticado para
+    impedir spam de não-alunos.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if get_aluno(request.user) is None:
+            return Response(
+                {'erro': 'Apenas alunos podem avaliar empresas.'},
+                status=drf_status.HTTP_403_FORBIDDEN,
+            )
+        empresa_id = request.data.get('empresa')
+        nota = request.data.get('nota')
+        comentario = (request.data.get('comentario') or '').strip()
+        try:
+            nota_int = int(nota)
+            if nota_int < 1 or nota_int > 5:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {'erro': 'Nota deve ser inteiro entre 1 e 5.'},
+                status=drf_status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            empresa = EmpresaConcedente.objects.get(pk=empresa_id)
+        except EmpresaConcedente.DoesNotExist:
+            return Response(
+                {'erro': 'Empresa não encontrada.'},
+                status=drf_status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Importa aqui para evitar dependência circular no topo
+        from .models import AvaliacaoEmpresa as _Av
+        _Av.objects.create(
+            empresa=empresa,
+            aluno=None,          # anônimo
+            processo=None,       # anônimo
+            nota=nota_int,
+            comentario=comentario,
+        )
+        return Response(
+            {'mensagem': 'Avaliação registrada anonimamente.'},
+            status=drf_status.HTTP_201_CREATED,
+        )

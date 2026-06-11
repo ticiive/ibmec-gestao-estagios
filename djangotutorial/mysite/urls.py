@@ -24,6 +24,14 @@ urlpatterns = [
         {'document_root': settings.BASE_DIR, 'path': 'dashboard-ibmec.html'},
         name='dashboard-ibmec',
     ),
+    # Deep link de redefinição de senha — serve o mesmo SPA, que detecta
+    # ?uid=...&token=... e exibe a tela RedefinirSenhaPage.
+    path(
+        'redefinir-senha/',
+        static_serve,
+        {'document_root': settings.BASE_DIR, 'path': 'dashboard-ibmec.html'},
+        name='redefinir-senha',
+    ),
     path('', RedirectView.as_view(url='/dashboard-ibmec.html', permanent=False)),
 ]
 
