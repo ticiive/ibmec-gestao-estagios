@@ -7,7 +7,40 @@ title: Diagrama de Classes
 
 ## Objetivo
 
-Este documento apresenta o modelo de classes conceitual do Sistema de Gestão e Mediação de Estágios Obrigatórios do IBMEC RJ. A modelagem foi derivada da elicitação de requisitos e, nesta fase de elaboração, mostra apenas classes e relacionamentos UML, sem atributos e sem métodos.
+Este documento apresenta o modelo de classes **conceitual** do Sistema de Gestão e Mediação de Estágios Obrigatórios do IBMEC RJ. A modelagem foi derivada da elicitação de requisitos e, nesta fase de elaboração, mostra apenas classes e relacionamentos UML, sem atributos e sem métodos.
+
+> **Observação importante.** Este diagrama é mantido em sua forma conceitual original. A implementação backend (Django + DRF) consolidou parte dessas classes em estruturas mais enxutas — por exemplo, `TCE`, `Convenio`, `TermoRealizacao`, `RelatorioPeriodico` e `RelatorioFinal` virariam todos instâncias de um único modelo `DocumentoProcesso` parametrizado por um campo `tipo`; `PlanoAtividades` virou um campo do `ProcessoEstagio`; `AvaliacaoDesempenho` e `ParecerAcademico` foram absorvidos pelo modelo `AvaliacaoEmpresa` combinado com o JSON `respostas_formulario` do processo. A tabela abaixo registra essa correspondência entre a classe conceitual e onde ela vive de fato no código.
+
+### Mapeamento "classe conceitual → onde vive na implementação"
+
+| Classe conceitual | Onde vive na implementação |
+| --- | --- |
+| `Usuario` (abstrata) | Concreta em `app.models.Usuario` (estende `AbstractUser`, `USERNAME_FIELD='email_institucional'`) |
+| `Aluno` | `app.models.Aluno` (1:1 com `Usuario`, FK para `Curso`) |
+| `CoordenadorCurso` | `app.models.Coordenador` (1:1 com `Usuario`); `Curso.coordenador` é FK com `related_name='cursos'` (1:N) |
+| `SupervisorEmpresa` | `app.models.SupervisorEmpresa` (1:1 com `Usuario`, FK para `EmpresaConcedente`) |
+| `EmpresaConcedente` | `app.models.EmpresaConcedente` |
+| `Curso` | `app.models.Curso` |
+| `RegraCurso` | Sem tabela própria — virou atributos diretos de `Curso` (`carga_horaria_minima_total`, `carga_horaria_maxima_diaria`) e validações dentro de `CriarProcessoSerializer.validate` |
+| `ProcessoEstagio` | `app.models.ProcessoEstagio` (agregado central, com `status` controlado por `state_machine.py`) |
+| `PlanoAtividades` | Campo `ProcessoEstagio.plano_atividades` (TextField), não é tabela separada |
+| `Documento` (abstrata) | `app.models.DocumentoProcesso` (concreta, com campo `tipo` para distinguir variantes) |
+| `TCE` | `DocumentoProcesso` com `tipo='TCE'` |
+| `Convenio` | Não modelado como tipo distinto na implementação — entra como `DocumentoProcesso` com `tipo='OUTRO'` quando necessário |
+| `TermoRealizacao` | `DocumentoProcesso` com `tipo='TERMO_REALIZACAO'`; PDF gerado em `GET /api/processos-estagio/{id}/gerar-termo-realizacao/` (reportlab) |
+| `RegistroCargaHoraria` | Não modelado como tabela — controle é derivado de `ProcessoEstagio.horas_semanais` + `data_inicio_prevista`/`data_fim_prevista` (estimativa em `dashboard_utils`) |
+| `RelatorioPeriodico` | `DocumentoProcesso` com `tipo='RELATORIO_PARCIAL'`; gerado pelo endpoint `POST /api/processos-estagio/{id}/gerar-relatorio/` (campo `tipo_relatorio='parcial'`) |
+| `RelatorioFinal` | `DocumentoProcesso` com `tipo='RELATORIO_FINAL'` (mesmo endpoint, `tipo_relatorio='final'`) |
+| `AvaliacaoDesempenho` (do supervisor) | Implementada como **resposta do aluno** ao `ModeloFormulario` do curso, armazenada em `ProcessoEstagio.respostas_formulario` (JSONField), e materializada como `DocumentoProcesso` (`RELATORIO_PARCIAL`/`RELATORIO_FINAL`) pelo `POST /api/processos-estagio/{id}/preencher-formulario/`. A inversão é deliberada: o **aluno** preenche o formulário avaliativo no IBMEC, não o supervisor |
+| `ParecerAcademico` (do coordenador) | Sem tabela própria — a decisão do coordenador vira `status` do `ProcessoEstagio` + `HistoricoStatusProcesso` (com `observacao`), e a justificativa (em rejeição) vai em `ProcessoEstagio.justificativa_rejeicao` |
+| `Notificacao` | Sem tabela própria — notificações são entregues por **email** (`send_mail`) nos pontos de transição relevantes (definição de senha do supervisor após cadastro de empresa por aluno, link de redefinição de senha). Jobs assíncronos/Celery ficam fora do escopo |
+| — *(novo na implementação)* | `app.models.AvaliacaoEmpresa` — avaliação do **aluno sobre a empresa**, em duas modalidades: **vinculada** (com FK para `aluno` e `processo`) e **anônima** (`aluno=None`, `processo=None`, identidade preservada via `aluno_hash` SHA-256) |
+| — *(novo na implementação)* | `app.models.LogDocumento` — trilha de auditoria por documento (upload, aprovado, rejeitado, gerado) |
+| — *(novo na implementação)* | `app.models.HistoricoStatusProcesso` — trilha de transições do processo (status anterior, status novo, usuário, observação) |
+| — *(novo na implementação)* | `app.models.ModeloFormulario` — schema JSON do formulário avaliativo por curso, com seções dinâmicas (`escala_1_4`, `escala_1_4_multi`, `escala_3`, `checkbox_duplo`, etc.) |
+| — *(novo na implementação)* | `app.models.TemplateDocumento` — modelo de TCE/Termo por curso |
+
+Quem está implementando uma feature deve consultar **primeiro** os modelos reais em `app/models.py` e os ViewSets em `app/views.py`. Este diagrama serve para entender a intenção semântica de cada conceito e a estrutura do domínio do estágio obrigatório, mas não substitui o código como fonte de verdade.
 
 ## Premissas de modelagem
 
@@ -417,3 +450,4 @@ O modelo proposto posiciona `ProcessoEstagio` como centro do domínio e distribu
 | 16/04/2026 | 2.2 | Mesclagem das visões 2C e 2D com remoção de classes de apoio ao fluxo | João Gabriel |
 | 16/04/2026 | 2.3 | Adição de visão geral integrada do processo com manutenção dos recortes detalhados | João Gabriel |
 | 16/04/2026 | 2.4 | Ajuste da regra de processo ativo por aluno e remoção de LogAuditoria | João Gabriel |
+| 11/06/2026 | 2.5 | Adicionada nota e tabela de mapeamento "classe conceitual → implementação" para refletir a consolidação feita no backend (DocumentoProcesso unificado, PlanoAtividades como campo, AvaliacaoEmpresa, HistoricoStatusProcesso, LogDocumento, ModeloFormulario, TemplateDocumento) | João Gabriel Teodósio |

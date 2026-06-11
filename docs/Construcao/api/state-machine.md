@@ -91,10 +91,11 @@ A ordem de validação na view é importante e está documentada no próprio flu
 1. Campo `status` foi enviado no body? Senão, 400.
 2. Transição existe em `TRANSICOES`? Senão, 400 com `transicoes_validas`.
 3. O usuário autenticado tem papel autorizado a disparar essa transição? Senão, 403.
-4. O serializer `AlterarStatusSerializer` consegue validar regras de negócio adicionais (por exemplo, justificativa obrigatória em `REJEITADO` — RN11)? Senão, 400.
-5. Persistir e retornar o processo completo via `ProcessoEstagioSerializer`.
+4. **RN05 (TCE)** — se a transição for `APROVADO → ATIVO`, existe um `DocumentoProcesso` do tipo `TCE` com `status=APROVADO` para esse processo? Senão, 400 com `{"detail": "RN05: é necessário que o TCE assinado esteja aprovado para ativar o estágio."}`. Veja [Regras de Negócio — RN05](regras-negocio.md#rn05--aprovadoativo-exige-tce-aprovado).
+5. O serializer `AlterarStatusSerializer` consegue validar regras de negócio adicionais (por exemplo, justificativa obrigatória em `REJEITADO` — RF11/RN11)? Senão, 400.
+6. Persistir, **registrar um `HistoricoStatusProcesso`** (`status_anterior`, `status_novo`, `usuario`, `observacao`) e retornar o processo completo via `ProcessoEstagioSerializer`.
 
-Essa ordem garante que o cliente recebe sempre o erro mais informativo possível: validação estrutural antes da semântica, semântica antes da autorização não-é, e validações de domínio por último.
+Essa ordem garante que o cliente recebe sempre o erro mais informativo possível: validação estrutural antes da semântica, semântica antes da autorização, autorização antes das regras de negócio do domínio e persistência por último — com trilha de auditoria em `HistoricoStatusProcesso` para reconstruir o ciclo de vida do processo a qualquer momento (`GET /api/processos-estagio/{id}/historico/`).
 
 Exemplo, tentando reativar um processo já rejeitado (`REJEITADO → ATIVO`):
 
@@ -124,14 +125,15 @@ A validação da máquina de estados garante que a transição **existe** no dom
 
 | Papel | Transições permitidas |
 | --- | --- |
-| Aluno (no próprio processo) | `RASCUNHO → PENDENTE`; qualquer estado vivo → `CANCELADO` |
-| Coordenador (em processos de alunos dos cursos sob sua coordenação) | `PENDENTE → {APROVADO, REJEITADO, CORRECAO_SOLICITADA}`; `APROVADO → ATIVO`; `ATIVO → ENCERRADO` |
+| Aluno (no próprio processo) | `RASCUNHO → PENDENTE`; **cancelamento apenas em `RASCUNHO` ou `PENDENTE`** (`{RASCUNHO, PENDENTE} → CANCELADO`). A partir de `APROVADO`, o aluno **não cancela diretamente** — precisa pedir o cancelamento ao coordenador |
+| Coordenador (em processos de alunos dos cursos sob sua coordenação) | `PENDENTE → {APROVADO, REJEITADO, CORRECAO_SOLICITADA}`; `APROVADO → ATIVO` (com RN05); `ATIVO → ENCERRADO`. Pode também emitir `CANCELADO` para retirar processos que já estão em `APROVADO`/`ATIVO`/`CORRECAO_SOLICITADA` (mas o conjunto autorizado é `{APROVADO, REJEITADO, CORRECAO_SOLICITADA, ATIVO, ENCERRADO}` — para cancelamentos em estado vivo, o admin é a rota recomendada) |
 | Admin (`is_staff` ou `is_superuser`) | Qualquer transição dentro do mapa `TRANSICOES` |
-| Supervisor de empresa | Nenhuma ação por enquanto (fora do escopo desta entrega) |
+| Perfis administrativos (`secretaria`, `casa`, `reitor`, `pro_reitor`, `carreiras`) | **Nenhuma**: visão global read-only. A view devolve `403` em qualquer chamada de escrita |
+| Supervisor de empresa | Nenhuma ação na máquina de estados |
 
 Violações de propriedade (aluno tentando alterar processo alheio, coordenador atuando em curso fora da sua coordenação) retornam **HTTP 403 Forbidden** com `{"detail": "..."}`. Violações da máquina retornam **HTTP 400**, conforme a seção anterior.
 
-Note que o coordenador **não pode** cancelar diretamente um processo: cancelamento por aluno cobre o caso "desisti", e cancelamento por admin cobre o caso "intervenção institucional". Isso evita que um coordenador encerre forçadamente um processo por engano, situação para a qual a transição correta é `ATIVO → ENCERRADO`.
+> **Por que o aluno só cancela em `RASCUNHO`/`PENDENTE`?** Antes da aprovação, o aluno pode desistir livremente sem afetar o coordenador ou a empresa. A partir de `APROVADO`, o cancelamento envolve revogação de aprovação, comunicação com a empresa e (em `ATIVO`) interrupção formal do estágio. Para evitar que o aluno acione esses efeitos colaterais sozinho, a regra força o pedido a passar pelo coordenador. O endpoint responde `403 Forbidden` com a mensagem `"Aluno só pode cancelar processos com status RASCUNHO ou PENDENTE."` quando o aluno tenta cancelar fora dessa janela.
 
 ## API pública do módulo
 
@@ -192,8 +194,21 @@ Esses testes são a primeira linha de defesa contra regressão silenciosa: se al
 
 Complementarmente, testes de integração em `ProcessoEstagioApiTest` exercitam a view `alterar_status` ponta a ponta — autenticação por token, validação de permissão por papel, persistência via ORM e formato da resposta — para garantir que o módulo continua se comportando da mesma forma quando consumido por dentro do stack Django/DRF.
 
+## Histórico de status (`HistoricoStatusProcesso`)
+
+Toda transição persistida cria automaticamente um registro em `HistoricoStatusProcesso` com:
+
+- `processo` — FK para o processo;
+- `status_anterior` e `status_novo` — strings das constantes de `state_machine.py`;
+- `usuario` — quem disparou a transição (FK para `Usuario`);
+- `observacao` — texto opcional enviado no body como `observacao`;
+- `data` — `auto_now_add`.
+
+Esse registro é a trilha de auditoria do ciclo de vida e é consumido pelo endpoint `GET /api/processos-estagio/{id}/historico/`. A inserção é feita **dentro** do mesmo bloco de `alterar_status` (passo 6 acima), de modo que persistência de status e histórico ficam consistentes mesmo em concorrência.
+
 ## Autor(es)
 
 | Data | Versão | Descrição | Autor(es) |
 | -- | -- | -- | -- |
 | 28/05/2026 | 1.0 | Criação do documento | João Gabriel Teodósio |
+| 11/06/2026 | 1.1 | Fluxo de `alterar_status` com 6 passos (RN05 TCE + `HistoricoStatusProcesso`); aluno cancela apenas em `RASCUNHO`/`PENDENTE`; perfis administrativos read-only | João Gabriel Teodósio |

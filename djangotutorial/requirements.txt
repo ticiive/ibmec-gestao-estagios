@@ -1,3 +1,8 @@
 Django==4.2.30
 djangorestframework==3.16.1
 django-allauth[socialaccount]==65.14.3
+django-cors-headers==4.9.0
+drf-spectacular==0.29.0
+python-dotenv==1.0.1
+reportlab==4.2.2
+PyPDF2==3.0.1
