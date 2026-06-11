@@ -31,6 +31,23 @@ A interface decide automaticamente qual painel mostrar a partir do **tipo do usu
 
 > O sistema **não tem mais o botão "Cadastre-se"** na tela de login. Contas comuns são criadas pelo coordenador/admin (ou geradas pelo seed). O fluxo de auto-cadastro de empresa pelo aluno cria automaticamente o usuário do supervisor — descrito em [Iniciar processo de estágio](#3-iniciar-um-processo-de-estágio).
 
+### Contas de teste (ambiente de demonstração)
+
+Ao popular o banco com `python manage.py seed_completo --force`, o sistema cria uma conta de cada **tipo de usuário** com a senha padrão `senha123` (o superusuário usa `admin`). Use a tabela abaixo para acessar a SPA com qualquer perfil:
+
+| Tipo de usuário | Login (email institucional) | Senha | Situação |
+| --- | --- | --- | --- |
+| Aluno | `andre.borges@aluno.ibmec.edu.br` | `senha123` | Ativo |
+| Coordenador | `clayton.silva@ibmec.edu.br` | `senha123` | Ativo |
+| Supervisor de empresa | `marcos.santiago@techsolutions.com.br` | `senha123` | Ativo |
+| Secretaria | `secretaria@ibmec.edu.br` | `senha123` | Ativo |
+| CASA | `carreiras@ibmec.edu.br` | `senha123` | Ativo |
+| Reitor | `reitor@ibmec.edu.br` | `senha123` | Ativo |
+| Pró-Reitor | `proreitor@ibmec.edu.br` | `senha123` | Ativo |
+| Administrador (superusuário) | `admin@ibmec.edu.br` | `admin` | Ativo |
+
+> O `seed_completo` gera 70 alunos (10 por curso) — `andre.borges@aluno.ibmec.edu.br` é apenas o primeiro deles. O perfil **administrador** entra pelo Django Admin (`/admin/`), não pela SPA. O tipo `carreiras` existe no modelo, mas **não é criado pelo seed**; gere-o manualmente pelo Django Admin se precisar testá-lo.
+
 ### Esqueci minha senha
 
 1. Na tela de login, clique em **Esqueci minha senha**.

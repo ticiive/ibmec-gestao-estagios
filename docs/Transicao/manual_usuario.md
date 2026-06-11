@@ -112,6 +112,23 @@ Requer o cabeçalho `Authorization: Token <token>`. Invalida o token imediatamen
 1. `POST /api/auth/esqueci-senha/` — informe `email_institucional`.
 2. `POST /api/auth/redefinir-senha/` — informe o token recebido por e-mail e a nova senha.
 
+### 4.5 Contas de Teste (ambiente de demonstração)
+
+Ao popular o banco com `python manage.py seed_completo --force`, o sistema cria uma conta de cada **tipo de usuário** com a senha padrão `senha123` (o superusuário usa `admin`). Use a tabela abaixo no `POST /api/auth/login/` (campo `email_institucional`) para autenticar com qualquer perfil:
+
+| Tipo de usuário | Login (`email_institucional`) | Senha | Situação |
+|-----------------|-------------------------------|-------|----------|
+| Aluno | `andre.borges@aluno.ibmec.edu.br` | `senha123` | Ativo |
+| Coordenador | `clayton.silva@ibmec.edu.br` | `senha123` | Ativo |
+| Supervisor de empresa | `marcos.santiago@techsolutions.com.br` | `senha123` | Ativo |
+| Secretaria | `secretaria@ibmec.edu.br` | `senha123` | Ativo |
+| CASA | `carreiras@ibmec.edu.br` | `senha123` | Ativo |
+| Reitor | `reitor@ibmec.edu.br` | `senha123` | Ativo |
+| Pró-Reitor | `proreitor@ibmec.edu.br` | `senha123` | Ativo |
+| Administrador (superusuário) | `admin@ibmec.edu.br` | `admin` | Ativo |
+
+> O `seed_completo` gera 70 alunos (10 por curso) — `andre.borges@aluno.ibmec.edu.br` é apenas o primeiro deles. O perfil **administrador** acessa o Django Admin em `/admin/`. O tipo `carreiras` existe no modelo, mas **não é criado pelo seed**; gere-o manualmente pelo Django Admin se precisar testá-lo.
+
 ---
 
 ## 5. Tutorial: Aluno
